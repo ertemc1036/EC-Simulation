@@ -11,11 +11,21 @@ const sim = ref<SimulationState | null>(null)
 const scenario = ref('Sollten Online-Foren KI-gestützte Moderation einsetzen?')
 /** Default always ManualAction — never auto-enable LLM. */
 const mode = ref<'manual' | 'llm'>('manual')
+/** Content language for LLM agents (default DE; overrides OASIS English prompts). */
+const language = ref('de')
 const maxSteps = ref(2)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const showLlmConfirm = ref(false)
 let socket: Socket | null = null
+
+function statusClass(status?: string) {
+  if (status === 'limit_reached') return 'status-limit'
+  if (status === 'failed' || status === 'error' || status === 'blocked') return 'status-fail'
+  if (status === 'completed') return 'status-ok'
+  if (status === 'running') return 'status-run'
+  return ''
+}
 
 const llmBanner = computed(() => {
   const cfg = health.value?.config
@@ -106,6 +116,7 @@ async function startSimulation(llmRunApproved: boolean) {
       scenario: scenario.value,
       mode: mode.value,
       max_steps: maxSteps.value,
+      language: language.value,
     }
     if (mode.value === 'llm') {
       body.llm_run_approved = llmRunApproved === true
@@ -170,6 +181,16 @@ onUnmounted(() => {
           </select>
         </label>
         <label>
+          Sprache
+          <select v-model="language">
+            <option value="de">Deutsch (Standard)</option>
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="es">Español</option>
+            <option value="it">Italiano</option>
+          </select>
+        </label>
+        <label>
           Schritte
           <input v-model.number="maxSteps" type="number" min="1" max="2" />
         </label>
@@ -231,13 +252,17 @@ onUnmounted(() => {
     <section class="status-strip" v-if="sim">
       <div>
         <span class="k">Status</span>
-        <span class="v">{{ sim.status }}</span>
+        <span class="v" :class="statusClass(sim.status)">{{ sim.status }}</span>
       </div>
       <div>
         <span class="k">Modus</span>
         <span class="v mode-pill" :class="sim.mode === 'llm' ? 'mode-llm' : 'mode-manual'">
           {{ sim.mode === 'llm' ? 'LLMAction' : 'ManualAction' }}
         </span>
+      </div>
+      <div>
+        <span class="k">Sprache</span>
+        <span class="v">{{ sim.language || language }}</span>
       </div>
       <div>
         <span class="k">Schritt</span>
@@ -248,6 +273,7 @@ onUnmounted(() => {
         <span class="v mono">{{ sim.run_id }}</span>
       </div>
       <p class="msg">{{ sim.message }}</p>
+      <p v-if="sim.stop_reason" class="msg muted">Stop: {{ sim.stop_reason }}</p>
       <p v-if="sim.error" class="err">{{ sim.error }}</p>
     </section>
 
@@ -340,9 +366,26 @@ onUnmounted(() => {
             <span class="mono">s{{ e.step ?? '-' }}</span>
             agent {{ e.agent_id }} · {{ e.action_type }}
             <span class="src" v-if="e.kind">· {{ e.kind }}</span>
+            <span class="src" v-if="e.goal">· Ziel: {{ e.goal }}</span>
           </li>
         </ol>
         <p v-else class="empty">Noch keine Aktionen.</p>
+
+        <h2>Entscheidungen</h2>
+        <p class="lede-sm">Szenario + Ziel + Sprache je LLM-Entscheidung (Nachvollziehbarkeit).</p>
+        <ol class="log" v-if="sim?.decision_log?.length">
+          <li v-for="(d, i) in sim.decision_log" :key="'d' + i">
+            <span class="badge src-llm">decision</span>
+            <span class="mono">s{{ d.step ?? '-' }}</span>
+            {{ d.agent_name || ('agent ' + d.agent_id) }}
+            · {{ d.ok === false ? 'fail' : 'ok' }}
+            <span class="src" v-if="d.tool_calls?.length">
+              · {{ d.tool_calls.map((t) => t.action).join(', ') }}
+            </span>
+            <span class="src" v-if="d.goal">· {{ d.goal }}</span>
+          </li>
+        </ol>
+        <p v-else class="empty">Noch keine LLM-Entscheidungen.</p>
 
         <h2>Runtime</h2>
         <ul class="meta-list" v-if="health">
@@ -352,6 +395,11 @@ onUnmounted(() => {
           <li>mcp {{ health.versions.mcp }}</li>
           <li>API-Key im Frontend: {{ health.config.api_key_exposed === false ? 'nein' : '?' }}</li>
           <li>LLM-Freigabe nötig: {{ health.config.llm_run_requires_approval ? 'ja' : '—' }}</li>
+          <li>Sim-Sprache Default: {{ health.config.simulation_language || 'de' }}</li>
+          <li>
+            Calls/Runde:
+            {{ health.config.model_calls_per_round_required ?? '—' }}
+          </li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
       </div>
@@ -623,6 +671,19 @@ input {
   grid-column: 1 / -1;
   margin: 0.2rem 0 0;
   color: var(--muted);
+}
+
+.status-ok {
+  color: var(--ok, #7dcea0);
+}
+.status-limit {
+  color: var(--warn, #e0b35a);
+}
+.status-fail {
+  color: var(--danger, #e07a7a);
+}
+.status-run {
+  color: var(--accent, #8ecae6);
 }
 
 .err {

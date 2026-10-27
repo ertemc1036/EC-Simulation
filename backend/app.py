@@ -115,12 +115,14 @@ def simulation_start():
     llm_run_approved = _truthy(
         body.get("llm_run_approved", body.get("confirm_llm_spend", False))
     )
+    language = body.get("language")  # optional; default SIMULATION_LANGUAGE / de
 
     result = engine.start(
         scenario,
         mode=mode,
         max_steps=max_steps_i,
         llm_run_approved=llm_run_approved,
+        language=language,
     )
     code = 200 if result.get("ok") else 409
     return jsonify(result), code

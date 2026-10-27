@@ -87,7 +87,9 @@ def test_cost_call_limit_stops_llm_rounds(results_dir: Path, monkeypatch: pytest
     assert result["ok"] is True
     engine._thread.join(timeout=120)
     state = engine.get_state()
-    assert state["status"] == "completed", state
+    assert state["status"] == "limit_reached", state
+    assert state["stop_reason"]
+    assert "Call-Limit" in (state["stop_reason"] or "")
     assert state["cost_summary"]["api_calls"] <= 3
     assert state["cost_summary"]["limit_hit"]
     assert "Call-Limit" in state["cost_summary"]["limit_hit"]
@@ -190,6 +192,7 @@ def test_llm_error_handling_soft_stop(results_dir: Path):
     engine._thread.join(timeout=60)
     state = engine.get_state()
     # Seed ManualAction still ran; LLM round aborted without crashing the process.
-    assert state["status"] in {"completed", "error"}
+    assert state["status"] == "failed", state
+    assert state["stop_reason"]
     assert state["posts"] or state["action_log"]
     assert any(e["source"] == "ManualAction" for e in state["action_log"])

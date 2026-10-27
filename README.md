@@ -1,8 +1,8 @@
-# EC-Simulation (Phase 2)
+# EC-Simulation (Phase 2.5)
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
 
-Phase 1: echte `ManualAction`-Läufe. Phase 2: echte OASIS `LLMAction` mit OpenAI-kompatiblem Modell, Zielen, begrenztem Erinnerungskontext, Kostenlimits und getrennter Protokollierung von Modellaufrufen vs. Platform-Aktionen.
+Phase 1: echte `ManualAction`-Läufe. Phase 2: echte OASIS `LLMAction` mit OpenAI-kompatiblem Modell, Zielen, begrenztem Erinnerungskontext, Kostenlimits und getrennter Protokollierung von Modellaufrufen vs. Platform-Aktionen. Phase 2.5: konfigurierbare Simulationssprache (Default Deutsch), Szenario/Ziel-Kontext je Entscheidung, Endzustände `completed | limit_reached | failed`.
 
 ## Voraussetzungen
 
@@ -60,9 +60,13 @@ npm run dev
 |-------|--------|--------|--------|
 | `manual` | echte `OasisEnv` + `ManualAction` | CAMEL StubModel | keine API-Calls |
 | `llm` | echte `OasisEnv` + `LLMAction` | OpenAI-kompatibel (`OPENAI_*`) | Calls/Tokens limitiert |
-| `auto` | LLM falls Key + `ALLOW_LLM_MODE`, sonst Manual | — | — |
+| `auto` | wird wie `manual` behandelt (kein stilles LLM) | — | — |
 
 Dashboard kennzeichnet Quellen im Aktionsprotokoll und führt **Modellaufrufe/Kosten** getrennt.
+
+**Modellaufrufe pro Runde:** 1 Call pro Agent (`LLMAction` → `perform_action_by_llm` → `astep`). Bei 5 Agenten × 2 Runden = 10 Calls (Live-Test-Ceiling). Seed-`ManualAction` kostet 0 Calls.
+
+**Endzustände:** `completed` (alle Runden), `limit_reached` (Call/Token/Kosten-Limit), `failed` (Fehler). Zusätzlich Lifecycle: `idle` / `running` / `blocked`.
 
 ## Verhalten ohne API-Key
 
@@ -75,8 +79,8 @@ Dashboard kennzeichnet Quellen im Aktionsprotokoll und führt **Modellaufrufe/Ko
 
 - `GET /api/health` — OASIS-Import, Versionen, LLM/Zep-Status (ohne Secrets)
 - `GET /api/agents` — fünf Agentenprofile inkl. Ziele
-- `POST /api/simulation/start` — `{ "scenario", "mode": "auto|manual|llm", "max_steps" }`
-- `GET /api/simulation` — Live-State inkl. `action_log`, `model_calls`, `cost_summary`
+- `POST /api/simulation/start` — `{ "scenario", "mode": "manual|llm", "max_steps", "language?", "llm_run_approved?" }`
+- `GET /api/simulation` — Live-State inkl. `action_log`, `decision_log`, `model_calls`, `cost_summary`, `stop_reason`
 - `GET /api/results` — JSON-Läufe unter `data/results/`
 - Socket.IO Event `simulation_update`
 
@@ -105,8 +109,10 @@ Erste LLMAction-Readiness-Defaults (5 Agenten × 2 Runden):
 - `LLM_PRICE_INPUT_PER_1M` / `LLM_PRICE_OUTPUT_PER_1M` (Dashboard + Kostenschätzung)
 - `REQUEST_TIMEOUT_SECONDS`
 - `ALLOW_LLM_MODE`
+- `SIMULATION_LANGUAGE` (Default `de`)
 
 Parallel: nur eine Simulation gleichzeitig (`status=running` → Start blockiert).
+Pro Lauf frische SQLite-DB (`{run_id}.db`) + `OASIS_DB_PATH` — kein DB-Reuse zwischen Läufen.
 
 ## Zep
 

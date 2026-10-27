@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import oasis
 from camel.memories import ChatHistoryMemory
+from camel.messages import BaseMessage
 from camel.models import BaseModelBackend, ModelFactory
 from camel.types import ModelPlatformType, ModelType
 from oasis import (
@@ -33,14 +34,27 @@ from backend.config import (
     Settings,
     settings as default_settings,
 )
-from backend.simulation.agents import DEFAULT_AGENTS
+from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.manual_script import build_manual_rounds
+from backend.simulation.prompts import (
+    SYSTEM_PROMPT_TEMPLATE,
+    build_decision_prompt,
+    build_profile_for_template,
+    language_display_name,
+    model_calls_required_per_round,
+    normalize_language,
+)
 from backend.simulation.tracked_model import TrackedModelBackend
 from backend.zep.client import ZepMemoryStub
 
 
 EventCallback = Callable[[dict[str, Any]], None]
+
+# Terminal run outcomes (plus lifecycle: idle|running|blocked).
+STATUS_COMPLETED = "completed"
+STATUS_LIMIT_REACHED = "limit_reached"
+STATUS_FAILED = "failed"
 
 
 def _utc_now() -> str:
@@ -50,18 +64,21 @@ def _utc_now() -> str:
 @dataclass
 class SimulationState:
     run_id: str
-    status: str = "idle"  # idle|running|completed|error|blocked
+    status: str = "idle"  # idle|running|completed|limit_reached|failed|blocked
     mode: str = "manual"  # manual|llm
     scenario: str = ""
+    language: str = "de"
     step: int = 0
     max_steps: int = 4
     llm_configured: bool = False
     message: str = ""
+    stop_reason: str | None = None
     agents: list[dict] = field(default_factory=list)
     posts: list[dict] = field(default_factory=list)
     comments: list[dict] = field(default_factory=list)
     reactions: list[dict] = field(default_factory=list)
     action_log: list[dict] = field(default_factory=list)
+    decision_log: list[dict] = field(default_factory=list)
     model_calls: list[dict] = field(default_factory=list)
     cost_summary: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
@@ -76,15 +93,18 @@ class SimulationState:
             "status": self.status,
             "mode": self.mode,
             "scenario": self.scenario,
+            "language": self.language,
             "step": self.step,
             "max_steps": self.max_steps,
             "llm_configured": self.llm_configured,
             "message": self.message,
+            "stop_reason": self.stop_reason,
             "agents": self.agents,
             "posts": self.posts,
             "comments": self.comments,
             "reactions": self.reactions,
             "action_log": self.action_log,
+            "decision_log": self.decision_log,
             "model_calls": self.model_calls,
             "cost_summary": self.cost_summary,
             "error": self.error,
@@ -114,6 +134,13 @@ class SimulationEngine:
         # Signature: agent_id -> BaseModelBackend (untracked; engine wraps it).
         self._model_factory = model_factory
         self._tracker: CostTracker | None = None
+        self._agent_profiles: dict[int, AgentProfile] = {
+            p.agent_id: p for p in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]
+        }
+        self._run_language: str = "de"
+        self._run_scenario: str = ""
+        self._limit_stop: bool = False
+        self._failed: bool = False
 
     def add_listener(self, cb: EventCallback) -> None:
         self._listeners.append(cb)
@@ -163,6 +190,7 @@ class SimulationEngine:
         mode: str | None = None,
         max_steps: int | None = None,
         llm_run_approved: bool = False,
+        language: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if self._is_busy():
@@ -183,6 +211,10 @@ class SimulationEngine:
                     "state": self.state.to_dict(),
                 }
 
+            sim_lang = normalize_language(
+                language if language is not None else self.cfg.simulation_language
+            )
+
             # Approval is enforced before key/availability checks so the gate
             # cannot be bypassed by frontend-only confirmation.
             if requested == "llm" and not llm_run_approved:
@@ -196,6 +228,7 @@ class SimulationEngine:
                     status="blocked",
                     mode="llm",
                     scenario=scenario,
+                    language=sim_lang,
                     llm_configured=self.cfg.llm_configured,
                     message=msg,
                     agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
@@ -213,6 +246,7 @@ class SimulationEngine:
                     status="blocked",
                     mode="llm",
                     scenario=scenario,
+                    language=sim_lang,
                     llm_configured=self.cfg.llm_configured,
                     message=self.cfg.status_payload()["llm_mode_blocked_reason"]
                     or "LLM-Modus nicht verfügbar.",
@@ -236,21 +270,28 @@ class SimulationEngine:
             self.cfg.results_dir.mkdir(parents=True, exist_ok=True)
             db_path = self.cfg.results_dir / f"{run_id}.db"
 
+            calls_per_round = model_calls_required_per_round(
+                min(len(DEFAULT_AGENTS), LIVE_TEST_MAX_AGENTS)
+            )
             if effective == "llm":
                 if self._model_factory is not None:
                     message = (
                         "LLM-Modus (Test-Injection): echte OASIS LLMAction, "
-                        "kein kostenpflichtiger Provider-Call. Freigabe bestätigt."
+                        "kein kostenpflichtiger Provider-Call. Freigabe bestätigt. "
+                        f"Sprache={sim_lang}."
                     )
                 else:
                     est = self.cfg.estimate_max_run_cost_usd(rounds=steps)
                     message = (
                         "LLM-Modus: echte OASIS LLMAction über OpenAI-kompatibles Modell. "
-                        f"Freigabe bestätigt. Limits: "
+                        f"Freigabe bestätigt. Sprache={sim_lang} "
+                        f"({language_display_name(sim_lang)}). "
+                        f"Limits: "
                         f"{min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS)} Calls / "
                         f"{self.cfg.max_tokens_per_run} Tokens / "
                         f"${self.cfg.max_cost_usd_per_run:.2f} / "
                         f"{steps} Runden / retries={self.cfg.llm_max_retries} / "
+                        f"~{calls_per_round} Modellaufrufe/Runde / "
                         f"geschätzte max. Kosten ~${est:.4f} "
                         "(Provider-Abrechnung kann abweichen)."
                     )
@@ -258,6 +299,7 @@ class SimulationEngine:
                 message = (
                     "ManualAction-Modus: echte OASIS-Umgebung mit StubModel — "
                     "keine LLM-API-Calls. "
+                    f"Sprache={sim_lang}. "
                     + (
                         "OPENAI_API_KEY fehlt."
                         if not self.cfg.llm_configured
@@ -266,11 +308,16 @@ class SimulationEngine:
                 )
 
             self._tracker = self._new_tracker()
+            self._limit_stop = False
+            self._failed = False
+            self._run_language = sim_lang
+            self._run_scenario = scenario.strip()
             self.state = SimulationState(
                 run_id=run_id,
                 status="running",
                 mode=effective,
                 scenario=scenario.strip(),
+                language=sim_lang,
                 max_steps=steps,
                 llm_configured=self.cfg.llm_configured,
                 message=message,
@@ -283,30 +330,42 @@ class SimulationEngine:
 
             self._thread = threading.Thread(
                 target=self._run_thread,
-                args=(scenario.strip(), effective, steps, db_path),
+                args=(scenario.strip(), effective, steps, db_path, sim_lang),
                 daemon=True,
             )
             self._thread.start()
             return {"ok": True, "state": self.state.to_dict()}
 
-    def _run_thread(self, scenario: str, mode: str, max_steps: int, db_path: Path) -> None:
+    def _run_thread(
+        self, scenario: str, mode: str, max_steps: int, db_path: Path, language: str
+    ) -> None:
         try:
-            asyncio.run(self._run_async(scenario, mode, max_steps, db_path))
+            asyncio.run(self._run_async(scenario, mode, max_steps, db_path, language))
         except Exception as exc:
             with self._lock:
-                self.state.status = "error"
+                self.state.status = STATUS_FAILED
                 self.state.error = str(exc)
+                self.state.stop_reason = "exception"
                 self.state.finished_at = _utc_now()
+                self.state.message = f"Fehlgeschlagen: {exc}"
             self._sync_cost_to_state()
             self._emit("error", {"error": str(exc)})
 
     async def _run_async(
-        self, scenario: str, mode: str, max_steps: int, db_path: Path
+        self,
+        scenario: str,
+        mode: str,
+        max_steps: int,
+        db_path: Path,
+        language: str,
     ) -> None:
+        # Fresh DB per run — never reuse prior simulation SQLite files.
         if db_path.exists():
             db_path.unlink()
+        # SocialEnvironment follower helpers read OASIS_DB_PATH; bind to this run.
+        os.environ["OASIS_DB_PATH"] = str(db_path)
 
-        graph = self._build_agent_graph(mode)
+        graph = self._build_agent_graph(mode, scenario=scenario, language=language)
         env = oasis.make(
             agent_graph=graph,
             platform=DefaultPlatformType.REDDIT,
@@ -325,24 +384,47 @@ class SimulationEngine:
             if mode == "manual":
                 await self._run_manual(env, scenario, max_steps, db_path)
             else:
-                await self._run_llm(env, scenario, max_steps, db_path)
+                await self._run_llm(env, scenario, max_steps, db_path, language)
         finally:
             await env.close()
 
         self._sync_cost_to_state()
+        # limit_reached only if we aborted before finishing planned rounds.
+        # Exhausting the call budget on the final round still counts as completed.
+        rounds_finished = self.state.step >= self.state.max_steps
+        early_limit_stop = bool(
+            (self._limit_stop or (self._tracker and self._tracker.limit_hit))
+            and not rounds_finished
+        )
+        if self._failed:
+            status = STATUS_FAILED
+            stop_reason = self.state.stop_reason or "llm_error"
+            msg_prefix = self.state.message or "Simulation fehlgeschlagen."
+        elif early_limit_stop:
+            status = STATUS_LIMIT_REACHED
+            stop_reason = (
+                (self._tracker.limit_hit if self._tracker else None)
+                or self.state.stop_reason
+                or "limit"
+            )
+            msg_prefix = f"Limit erreicht ({self.state.mode}). {stop_reason}"
+        else:
+            status = STATUS_COMPLETED
+            stop_reason = "all_rounds_finished"
+            if self._tracker and self._tracker.limit_hit and rounds_finished:
+                stop_reason = "all_rounds_finished_budget_exhausted"
+            msg_prefix = f"Abgeschlossen ({self.state.mode})."
+
+        with self._lock:
+            self.state.status = status
+            self.state.stop_reason = stop_reason
+            self.state.finished_at = _utc_now()
+
         result_path = self._persist_results(db_path)
         with self._lock:
-            self.state.status = "completed"
             self.state.result_path = str(result_path)
-            self.state.finished_at = _utc_now()
-            limit_note = ""
-            if self._tracker and self._tracker.limit_hit:
-                limit_note = f" Limit: {self._tracker.limit_hit}"
-            self.state.message = (
-                f"Abgeschlossen ({self.state.mode}). "
-                f"Ergebnisse: {result_path.name}.{limit_note}"
-            )
-        self._emit("completed")
+            self.state.message = f"{msg_prefix} Ergebnisse: {result_path.name}."
+        self._emit("completed" if status == STATUS_COMPLETED else status)
 
     def _build_inner_model(self, mode: str, agent_id: int) -> BaseModelBackend:
         if self._model_factory is not None:
@@ -390,7 +472,92 @@ class SimulationEngine:
             agent_id=getattr(agent, "agent_id", None),
         )
 
-    def _build_agent_graph(self, mode: str) -> AgentGraph:
+    def _install_decision_hook(
+        self,
+        agent: SocialAgent,
+        profile: AgentProfile,
+        *,
+        scenario: str,
+        language: str,
+    ) -> None:
+        """Replace OASIS English like-bait perform_action_by_llm with scenario context."""
+        engine = self
+
+        async def perform_action_by_llm_bound():
+            env_prompt = await agent.env.to_text_prompt()
+            # Strip OASIS env_template like-bait residue from the observed blob
+            # by wrapping it — our decision prompt forbids tweet/like spam.
+            user_content = build_decision_prompt(
+                scenario=scenario,
+                goal=profile.goal,
+                language=language,
+                env_prompt=env_prompt,
+                agent_name=profile.name,
+            )
+            user_msg = BaseMessage.make_user_message(
+                role_name="User",
+                content=user_content,
+            )
+            decision_base = {
+                "agent_id": profile.agent_id,
+                "agent_name": profile.name,
+                "goal": profile.goal,
+                "scenario": scenario,
+                "language": language,
+                "env_preview": (env_prompt or "")[:400],
+                "ts": _utc_now(),
+            }
+            try:
+                response = await agent.astep(user_msg)
+                tool_calls = []
+                info = getattr(response, "info", None) or {}
+                for tool_call in info.get("tool_calls") or []:
+                    action_name = getattr(tool_call, "tool_name", None) or getattr(
+                        tool_call, "name", None
+                    )
+                    args = getattr(tool_call, "args", None) or {}
+                    tool_calls.append({"action": action_name, "args": args})
+                    engine._append_action_log(
+                        {
+                            "step": engine.state.step + 1,
+                            "agent_id": profile.agent_id,
+                            "action_type": action_name,
+                            "action_args": args,
+                            "source": "LLMAction",
+                            "kind": "simulated_platform_action",
+                            "via": "decision_hook",
+                            "goal": profile.goal,
+                            "language": language,
+                            "ts": _utc_now(),
+                        }
+                    )
+                engine._append_decision_log(
+                    {
+                        **decision_base,
+                        "step": engine.state.step + 1,
+                        "ok": True,
+                        "tool_calls": tool_calls,
+                        "note": "scenario+goal injected; OASIS default decision prompt bypassed",
+                    }
+                )
+                return response
+            except Exception as exc:
+                engine._append_decision_log(
+                    {
+                        **decision_base,
+                        "step": engine.state.step + 1,
+                        "ok": False,
+                        "error": str(exc),
+                        "tool_calls": [],
+                    }
+                )
+                raise
+
+        agent.perform_action_by_llm = perform_action_by_llm_bound  # type: ignore[method-assign]
+
+    def _build_agent_graph(
+        self, mode: str, *, scenario: str, language: str
+    ) -> AgentGraph:
         graph = AgentGraph()
         available = ActionType.get_default_reddit_actions()
         for profile in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]:
@@ -400,33 +567,33 @@ class SimulationEngine:
                 if mode == "llm"
                 else inner
             )
+            # Custom TextPrompt — OASIS default Reddit prompt says "tweets" and
+            # ignores UserInfo.description unless other_info.user_profile is set.
+            profile_dict = build_profile_for_template(
+                profile, scenario=scenario, language=language
+            )
             agent = SocialAgent(
                 agent_id=profile.agent_id,
                 user_info=UserInfo(
                     user_name=profile.user_name,
                     name=profile.name,
                     description=(
-                        f"Du bist {profile.name}. {profile.description} "
-                        f"Dein individuelles Ziel: {profile.goal}. "
-                        f"Kommunikationsstil: {profile.style}. "
-                        f"Beobachte Beiträge anderer Agenten und reagiere darauf "
-                        f"(kommentieren, liken, eigenen Beitrag), solange es dein Ziel "
-                        f"voranbringt. Halte dich an das Szenario."
+                        f"{profile.description} Ziel: {profile.goal}. "
+                        f"Stil: {profile.style}."
                     ),
-                    profile={
-                        "persona": profile.description,
-                        "goal": profile.goal,
-                        "style": profile.style,
-                        "memory_window": self.cfg.agent_memory_window,
-                    },
+                    profile=profile_dict,
                     recsys_type="reddit",
                 ),
+                user_info_template=SYSTEM_PROMPT_TEMPLATE,
                 agent_graph=graph,
                 model=model,
                 available_actions=available,
             )
             if mode == "llm":
                 self._apply_memory_window(agent)
+                self._install_decision_hook(
+                    agent, profile, scenario=scenario, language=language
+                )
             graph.add_agent(agent)
         return graph
 
@@ -439,6 +606,7 @@ class SimulationEngine:
             for agent_id, acts in round_map.items():
                 agent = env.agent_graph.get_agent(agent_id)
                 actions[agent] = acts
+                profile = self._agent_profiles.get(agent_id)
                 for act in acts:
                     self._append_action_log(
                         {
@@ -448,6 +616,8 @@ class SimulationEngine:
                             "action_args": act.action_args,
                             "source": "ManualAction",
                             "kind": "simulated_platform_action",
+                            "goal": profile.goal if profile else None,
+                            "language": self._run_language,
                             "ts": _utc_now(),
                         }
                     )
@@ -458,18 +628,17 @@ class SimulationEngine:
             self._emit("step", {"step": idx + 1})
 
     async def _run_llm(
-        self, env, scenario: str, max_steps: int, db_path: Path
+        self, env, scenario: str, max_steps: int, db_path: Path, language: str
     ) -> None:
         # Seed so agents have content to perceive (ManualAction, not billed).
         seed_agent = env.agent_graph.get_agent(0)
+        seed_content = (
+            f"[Seed / {DEFAULT_AGENTS[0].name}] Diskussionsimpuls ({language}): "
+            f"{scenario[:500]} — Ziel: {DEFAULT_AGENTS[0].goal}"
+        )
         seed = ManualAction(
             action_type=ActionType.CREATE_POST,
-            action_args={
-                "content": (
-                    f"[Seed / {DEFAULT_AGENTS[0].name}] Diskussionsimpuls: "
-                    f"{scenario[:500]} — Ziel: {DEFAULT_AGENTS[0].goal}"
-                ),
-            },
+            action_args={"content": seed_content},
         )
         self._append_action_log(
             {
@@ -480,6 +649,8 @@ class SimulationEngine:
                 "source": "ManualAction",
                 "kind": "simulated_platform_action",
                 "note": "seed_before_llm",
+                "goal": DEFAULT_AGENTS[0].goal,
+                "language": language,
                 "ts": _utc_now(),
             }
         )
@@ -491,10 +662,12 @@ class SimulationEngine:
             assert self._tracker is not None
             remaining = self._tracker.remaining_calls()
             if remaining <= 0 or self._tracker.limit_hit:
+                self._limit_stop = True
                 with self._lock:
                     self.state.message = self._tracker.limit_hit or (
                         "LLM-Call-Limit erreicht."
                     )
+                    self.state.stop_reason = self.state.message
                 self._sync_cost_to_state()
                 break
             # One parallel sim only; within a round, cap agents by remaining calls
@@ -504,29 +677,40 @@ class SimulationEngine:
             ][: min(remaining, LIVE_TEST_MAX_AGENTS)]
             actions = {agent: LLMAction() for agent in agents}
             for agent in agents:
+                profile = self._agent_profiles.get(agent.social_agent_id)
                 self._append_action_log(
                     {
                         "step": step,
                         "agent_id": agent.social_agent_id,
                         "action_type": "LLMAction",
-                        "action_args": {},
+                        "action_args": {
+                            "scenario": scenario,
+                            "goal": profile.goal if profile else None,
+                            "language": language,
+                        },
                         "source": "LLMAction",
                         "kind": "llm_decision_request",
+                        "goal": profile.goal if profile else None,
+                        "language": language,
                         "ts": _utc_now(),
                     }
                 )
             try:
                 await env.step(actions)
             except LimitExceeded as exc:
+                self._limit_stop = True
                 with self._lock:
                     self.state.message = str(exc)
+                    self.state.stop_reason = str(exc)
                 self._sync_cost_to_state()
                 break
             except Exception as exc:
                 # Soft-fail a round: record and stop rather than crash unpaid tests.
+                self._failed = True
                 with self._lock:
                     self.state.message = f"LLM-Runde abgebrochen: {exc}"
                     self.state.error = str(exc)
+                    self.state.stop_reason = "llm_round_error"
                 self._sync_cost_to_state()
                 self._refresh_from_db(db_path, merge_llm_traces=True, step=step)
                 break
@@ -540,11 +724,20 @@ class SimulationEngine:
             if self._tracker.limit_hit:
                 with self._lock:
                     self.state.message = self._tracker.limit_hit
+                    self.state.stop_reason = self._tracker.limit_hit
+                # Budget exhausted after a finished round: early-stop only if
+                # more rounds were planned (otherwise status stays completed).
+                if step < max_steps:
+                    self._limit_stop = True
                 break
 
     def _append_action_log(self, entry: dict[str, Any]) -> None:
         with self._lock:
             self.state.action_log.append(entry)
+
+    def _append_decision_log(self, entry: dict[str, Any]) -> None:
+        with self._lock:
+            self.state.decision_log.append(entry)
 
     def _refresh_from_db(
         self,
@@ -628,6 +821,18 @@ class SimulationEngine:
                     key = (t.get("user_id"), action, str(info))
                     if key in known:
                         continue
+                    # Skip duplicates already logged via decision_hook (args may
+                    # differ in serialization); prefer hook entries for goals.
+                    already_hook = any(
+                        e.get("via") == "decision_hook"
+                        and e.get("agent_id") == t.get("user_id")
+                        and e.get("action_type") == action
+                        and e.get("step") == step
+                        for e in self.state.action_log
+                    )
+                    if already_hook:
+                        continue
+                    profile = self._agent_profiles.get(t.get("user_id"))
                     entry = {
                         "step": step,
                         "agent_id": t.get("user_id"),
@@ -636,6 +841,8 @@ class SimulationEngine:
                         "source": "LLMAction",
                         "kind": "simulated_platform_action",
                         "via": "oasis_trace",
+                        "goal": profile.goal if profile else None,
+                        "language": self._run_language,
                         "ts": t.get("created_at"),
                     }
                     self.state.action_log.append(entry)
@@ -661,23 +868,32 @@ class SimulationEngine:
         self._refresh_from_db(db_path)
         self._sync_cost_to_state()
         out = self.cfg.results_dir / f"{self.state.run_id}.json"
+        agents_n = min(len(DEFAULT_AGENTS), LIVE_TEST_MAX_AGENTS)
         payload = {
             "meta": {
                 "run_id": self.state.run_id,
                 "scenario": self.state.scenario,
+                "language": self.state.language,
                 "mode": self.state.mode,
+                "status": self.state.status,
+                "stop_reason": self.state.stop_reason,
                 "llm_configured": self.state.llm_configured,
                 "started_at": self.state.started_at,
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "agent_memory_window": self.cfg.agent_memory_window,
+                "model_calls_per_round_required": model_calls_required_per_round(
+                    agents_n
+                ),
+                "db_isolation": "per_run_sqlite + OASIS_DB_PATH",
             },
             "agents": self.state.agents,
             "posts": self.state.posts,
             "comments": self.state.comments,
             "reactions": self.state.reactions,
             "action_log": self.state.action_log,
+            "decision_log": self.state.decision_log,
             "model_calls": self.state.model_calls,
             "cost_summary": self.state.cost_summary,
             "db_path": str(db_path),

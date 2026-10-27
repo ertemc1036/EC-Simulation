@@ -16,6 +16,8 @@ export interface ActionLogEntry {
   kind?: string
   note?: string
   via?: string
+  goal?: string
+  language?: string
   ts?: string
 }
 
@@ -50,20 +52,38 @@ export interface CostSummary {
   cost_estimate_disclaimer?: string
 }
 
+export interface DecisionLogEntry {
+  step?: number | null
+  agent_id?: number | null
+  agent_name?: string
+  goal?: string
+  scenario?: string
+  language?: string
+  ok?: boolean
+  tool_calls?: Array<{ action?: string; args?: unknown }>
+  error?: string
+  note?: string
+  env_preview?: string
+  ts?: string
+}
+
 export interface SimulationState {
   run_id: string
   status: string
   mode: string
   scenario: string
+  language?: string
   step: number
   max_steps: number
   llm_configured: boolean
   message: string
+  stop_reason?: string | null
   agents: AgentProfile[]
   posts: Array<Record<string, unknown>>
   comments: Array<Record<string, unknown>>
   reactions: Array<Record<string, unknown>>
   action_log: ActionLogEntry[]
+  decision_log?: DecisionLogEntry[]
   model_calls: ModelCallEntry[]
   cost_summary: CostSummary
   error: string | null
@@ -95,6 +115,10 @@ export interface HealthResponse {
     cost_estimate_disclaimer?: string
     llm_max_retries?: number
     agent_memory_window?: number
+    simulation_language?: string
+    model_calls_per_round_required?: number
+    model_calls_budget_note?: string
+    terminal_statuses?: string[]
     live_test_limits?: {
       max_agents: number
       max_rounds: number

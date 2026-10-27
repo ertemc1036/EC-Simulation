@@ -43,6 +43,18 @@ def _float(name: str, default: float) -> float:
     return float(raw)
 
 
+_KNOWN_SIM_LANGUAGES = frozenset({"de", "en", "fr", "es", "it"})
+
+
+def _normalize_sim_language(code: str | None) -> str:
+    """Default German; keep independent of simulation.prompts (avoid import cycles)."""
+    raw = (code or "de").strip().lower()
+    if not raw:
+        return "de"
+    short = raw.split("-", 1)[0]
+    return short if short in _KNOWN_SIM_LANGUAGES else "de"
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str
@@ -60,6 +72,7 @@ class Settings:
     price_output_per_1m: float
     request_timeout_seconds: int
     allow_llm_mode: bool
+    simulation_language: str
     flask_host: str
     flask_port: int
     flask_debug: bool
@@ -129,14 +142,23 @@ class Settings:
             "cost_estimate_disclaimer": COST_ESTIMATE_DISCLAIMER,
             "llm_max_retries": self.llm_max_retries,
             "agent_memory_window": self.agent_memory_window,
+            "simulation_language": self.simulation_language,
             "price_input_per_1m_usd": self.price_input_per_1m,
             "price_output_per_1m_usd": self.price_output_per_1m,
+            # OASIS LLMAction: 1 model call per agent per round (astep once).
+            "model_calls_per_round_required": self.max_agents,
+            "model_calls_budget_note": (
+                f"{self.max_agents} Agenten × Runden ≤ "
+                f"MAX_LLM_CALLS_PER_RUN ({self.max_llm_calls_per_run}); "
+                "Seed-ManualAction kostet 0 Calls."
+            ),
             "live_test_limits": {
                 "max_agents": LIVE_TEST_MAX_AGENTS,
                 "max_rounds": LIVE_TEST_MAX_ROUNDS,
                 "max_model_calls": LIVE_TEST_MAX_LLM_CALLS,
                 "max_retries": LIVE_TEST_MAX_RETRIES,
             },
+            "terminal_statuses": ["completed", "limit_reached", "failed"],
             "zep_enabled": self.zep_enabled,
             "zep_configured": bool(self.zep_api_key.strip()),
             "oasis_package": "camel-oasis",
@@ -169,6 +191,9 @@ def load_settings() -> Settings:
         max(0, _int("LLM_MAX_RETRIES", LIVE_TEST_MAX_RETRIES)),
         LIVE_TEST_MAX_RETRIES,
     )
+    # Default German — live run showed English drift from OASIS defaults.
+    sim_lang = _normalize_sim_language(os.getenv("SIMULATION_LANGUAGE", "de"))
+
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
@@ -185,6 +210,7 @@ def load_settings() -> Settings:
         price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 1.60),
         request_timeout_seconds=_int("REQUEST_TIMEOUT_SECONDS", 60),
         allow_llm_mode=_bool("ALLOW_LLM_MODE", True),
+        simulation_language=sim_lang,
         flask_host=os.getenv("FLASK_HOST", "127.0.0.1"),
         flask_port=_int("FLASK_PORT", 5001),
         flask_debug=_bool("FLASK_DEBUG", False),

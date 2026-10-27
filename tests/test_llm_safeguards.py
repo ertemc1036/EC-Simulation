@@ -152,7 +152,8 @@ def test_call_limit_aborts_run(results_dir: Path, monkeypatch: pytest.MonkeyPatc
     assert result["ok"] is True
     engine._thread.join(timeout=120)
     state = engine.get_state()
-    assert state["status"] == "completed", state
+    assert state["status"] == "limit_reached", state
+    assert state["stop_reason"]
     assert state["cost_summary"]["api_calls"] <= 2
     assert state["cost_summary"]["limit_hit"]
     assert "Call-Limit" in state["cost_summary"]["limit_hit"]
