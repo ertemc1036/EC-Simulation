@@ -39,6 +39,7 @@ class CostTracker:
     max_tokens: int
     price_input_per_1m: float
     price_output_per_1m: float
+    max_cost_usd: float = 0.20
     model_name: str = ""
     calls: list[ModelCallRecord] = field(default_factory=list)
     limit_hit: str | None = None
@@ -76,7 +77,12 @@ class CostTracker:
             + completion_tokens / 1_000_000.0 * self.price_output_per_1m
         )
 
-    def check_can_call(self, *, estimated_prompt_tokens: int = 0) -> None:
+    def check_can_call(
+        self,
+        *,
+        estimated_prompt_tokens: int = 0,
+        estimated_completion_tokens: int = 0,
+    ) -> None:
         with self._lock:
             if self.limit_hit:
                 raise LimitExceeded(self.limit_hit)
@@ -99,6 +105,23 @@ class CostTracker:
                     f"(MAX_TOKENS_PER_RUN={self.max_tokens})."
                 )
                 raise LimitExceeded(self.limit_hit)
+            if self.max_cost_usd > 0 and self.estimated_cost_usd >= self.max_cost_usd:
+                self.limit_hit = (
+                    f"Kosten-Limit erreicht (MAX_COST_USD_PER_RUN={self.max_cost_usd})."
+                )
+                raise LimitExceeded(self.limit_hit)
+            if self.max_cost_usd > 0 and (
+                estimated_prompt_tokens or estimated_completion_tokens
+            ):
+                projected = self.estimated_cost_usd + self.estimate_cost(
+                    estimated_prompt_tokens, estimated_completion_tokens
+                )
+                if projected > self.max_cost_usd:
+                    self.limit_hit = (
+                        f"Kosten-Limit würde überschritten "
+                        f"(MAX_COST_USD_PER_RUN={self.max_cost_usd})."
+                    )
+                    raise LimitExceeded(self.limit_hit)
 
     def record(
         self,
@@ -137,6 +160,14 @@ class CostTracker:
                 self.limit_hit = (
                     f"API-Call-Limit erreicht (MAX_LLM_CALLS_PER_RUN={self.max_calls})."
                 )
+            if (
+                self.max_cost_usd > 0
+                and self.estimated_cost_usd >= self.max_cost_usd
+                and not self.limit_hit
+            ):
+                self.limit_hit = (
+                    f"Kosten-Limit erreicht (MAX_COST_USD_PER_RUN={self.max_cost_usd})."
+                )
             return rec
 
     def summary(self) -> dict[str, Any]:
@@ -148,6 +179,7 @@ class CostTracker:
             "estimated_cost_usd": self.estimated_cost_usd,
             "max_llm_calls_per_run": self.max_calls,
             "max_tokens_per_run": self.max_tokens,
+            "max_cost_usd_per_run": self.max_cost_usd,
             "remaining_calls": self.remaining_calls(),
             "remaining_tokens": self.remaining_tokens(),
             "limit_hit": self.limit_hit,

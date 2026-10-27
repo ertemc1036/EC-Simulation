@@ -39,7 +39,8 @@ class TrackedModelBackend(BaseModelBackend):
             url=getattr(inner, "_url", None),
             token_counter=getattr(inner, "_token_counter", None),
             timeout=getattr(inner, "_timeout", None),
-            max_retries=getattr(inner, "_max_retries", 3),
+            # Prefer inner setting; default 0 (no auto-retries) for cost safety.
+            max_retries=getattr(inner, "_max_retries", 0),
         )
         self._inner = inner
         self._tracker = tracker

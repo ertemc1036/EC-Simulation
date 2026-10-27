@@ -94,11 +94,51 @@ def test_cost_token_limit_blocks_before_call():
         max_tokens=50,
         price_input_per_1m=0.15,
         price_output_per_1m=0.6,
+        max_cost_usd=10.0,
         model_name="test",
     )
     tracker.record(agent_id=0, prompt_tokens=40, completion_tokens=20, source="scripted_test")
     with pytest.raises(LimitExceeded):
         tracker.check_can_call()
+
+
+def test_cost_usd_limit_blocks_before_call():
+    tracker = CostTracker(
+        max_calls=100,
+        max_tokens=1_000_000,
+        price_input_per_1m=10.0,
+        price_output_per_1m=20.0,
+        max_cost_usd=0.20,
+        model_name="test",
+    )
+    # ~0.21 USD at these prices → hard stop before next call
+    tracker.record(
+        agent_id=0, prompt_tokens=10_000, completion_tokens=5_500, source="scripted_test"
+    )
+    assert tracker.estimated_cost_usd >= 0.20
+    with pytest.raises(LimitExceeded) as exc:
+        tracker.check_can_call()
+    assert "Kosten-Limit" in str(exc.value)
+
+
+def test_readiness_budget_math_five_agents_two_rounds():
+    """5 agents × 2 LLM rounds = 10 decisions → fits MAX_LLM_CALLS_PER_RUN=10."""
+    assert 5 * 2 == 10
+    cfg_defaults = {
+        "max_steps": 2,
+        "agents": 5,
+        "max_calls": 10,
+        "max_tokens_per_call": 500,
+        "max_tokens_per_run": 20_000,
+        "max_cost_usd": 0.20,
+    }
+    assert cfg_defaults["agents"] * cfg_defaults["max_steps"] <= cfg_defaults["max_calls"]
+    # Worst-case completion tokens alone stay under run token + cost ceilings
+    # at gpt-4.1-mini list prices ($0.40 / $1.60 per 1M).
+    worst_completion = cfg_defaults["max_calls"] * cfg_defaults["max_tokens_per_call"]
+    assert worst_completion <= cfg_defaults["max_tokens_per_run"]
+    worst_cost = worst_completion / 1_000_000.0 * 1.60
+    assert worst_cost < cfg_defaults["max_cost_usd"]
 
 
 def test_tracked_model_records_usage_and_errors():

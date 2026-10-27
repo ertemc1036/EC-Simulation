@@ -41,6 +41,7 @@ export interface CostSummary {
   estimated_cost_usd?: number
   max_llm_calls_per_run?: number
   max_tokens_per_run?: number
+  max_cost_usd_per_run?: number
   remaining_calls?: number
   remaining_tokens?: number
   limit_hit?: string | null
@@ -82,7 +83,10 @@ export interface HealthResponse {
     openai_base_url?: string
     max_simulation_steps: number
     max_llm_calls_per_run?: number
+    max_tokens_per_call?: number
     max_tokens_per_run?: number
+    max_cost_usd_per_run?: number
+    llm_max_retries?: number
     agent_memory_window?: number
     zep_enabled: boolean
     zep_configured: boolean

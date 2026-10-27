@@ -130,6 +130,7 @@ class SimulationEngine:
             max_tokens=self.cfg.max_tokens_per_run,
             price_input_per_1m=self.cfg.price_input_per_1m,
             price_output_per_1m=self.cfg.price_output_per_1m,
+            max_cost_usd=self.cfg.max_cost_usd_per_run,
             model_name=self.cfg.openai_model,
         )
 
@@ -201,7 +202,8 @@ class SimulationEngine:
                         "LLM-Modus: echte OASIS LLMAction über OpenAI-kompatibles Modell. "
                         f"Limits: {self.cfg.max_llm_calls_per_run} Calls / "
                         f"{self.cfg.max_tokens_per_run} Tokens / "
-                        f"{steps} Runden."
+                        f"${self.cfg.max_cost_usd_per_run:.2f} / "
+                        f"{steps} Runden / retries={self.cfg.llm_max_retries}."
                     )
             else:
                 message = (
@@ -307,6 +309,7 @@ class SimulationEngine:
                 api_key=self.cfg.openai_api_key,
                 url=self.cfg.openai_base_url,
                 timeout=float(self.cfg.request_timeout_seconds),
+                max_retries=max(0, int(self.cfg.llm_max_retries)),
                 model_config_dict={
                     "temperature": 0.7,
                     "max_tokens": self.cfg.max_tokens_per_call,
@@ -444,7 +447,8 @@ class SimulationEngine:
                     )
                 self._sync_cost_to_state()
                 break
-
+            # One parallel sim only; within a round, cap agents by remaining calls
+            # so 5 agents × N rounds cannot exceed MAX_LLM_CALLS_PER_RUN.
             agents = [a for _, a in env.agent_graph.get_agents()][:remaining]
             actions = {agent: LLMAction() for agent in agents}
             for agent in agents:

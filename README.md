@@ -92,14 +92,21 @@ LLM-Pfad-Tests nutzen eine injizierte `ScriptedReactiveModel` (echte `LLMAction`
 
 ## Kosten-/Sicherheitslimits (`.env`)
 
-- `MAX_SIMULATION_STEPS` (Default 8)
-- `MAX_LLM_CALLS_PER_RUN` (Default 40)
-- `MAX_TOKENS_PER_CALL` (Default 512)
+Erste LLMAction-Readiness-Defaults (5 Agenten × 2 Runden):
+
+- `OPENAI_MODEL` (Default `gpt-4.1-mini`, OpenAI-kompatibel via CAMEL)
+- `MAX_SIMULATION_STEPS` (Default 2)
+- `MAX_LLM_CALLS_PER_RUN` (Default 10)
+- `MAX_TOKENS_PER_CALL` (Default 500)
 - `MAX_TOKENS_PER_RUN` (Default 20000)
-- `AGENT_MEMORY_WINDOW` (Default 8)
-- `LLM_PRICE_INPUT_PER_1M` / `LLM_PRICE_OUTPUT_PER_1M` (Dashboard-Schätzung)
+- `MAX_COST_USD_PER_RUN` (Default 0.20 — hartes Limit vor dem nächsten Call)
+- `LLM_MAX_RETRIES` (Default 0 — keine automatischen Provider-Retries)
+- `AGENT_MEMORY_WINDOW` (Default 6)
+- `LLM_PRICE_INPUT_PER_1M` / `LLM_PRICE_OUTPUT_PER_1M` (Dashboard + Kostenschätzung)
 - `REQUEST_TIMEOUT_SECONDS`
 - `ALLOW_LLM_MODE`
+
+Parallel: nur eine Simulation gleichzeitig (`status=running` → Start blockiert).
 
 ## Zep
 

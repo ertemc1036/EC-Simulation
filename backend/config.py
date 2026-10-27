@@ -41,6 +41,8 @@ class Settings:
     max_llm_calls_per_run: int
     max_tokens_per_call: int
     max_tokens_per_run: int
+    max_cost_usd_per_run: float
+    llm_max_retries: int
     agent_memory_window: int
     price_input_per_1m: float
     price_output_per_1m: float
@@ -86,6 +88,8 @@ class Settings:
             "max_llm_calls_per_run": self.max_llm_calls_per_run,
             "max_tokens_per_call": self.max_tokens_per_call,
             "max_tokens_per_run": self.max_tokens_per_run,
+            "max_cost_usd_per_run": self.max_cost_usd_per_run,
+            "llm_max_retries": self.llm_max_retries,
             "agent_memory_window": self.agent_memory_window,
             "price_input_per_1m_usd": self.price_input_per_1m,
             "price_output_per_1m_usd": self.price_output_per_1m,
@@ -111,14 +115,16 @@ def load_settings() -> Settings:
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        max_simulation_steps=_int("MAX_SIMULATION_STEPS", 8),
-        max_llm_calls_per_run=_int("MAX_LLM_CALLS_PER_RUN", 40),
-        max_tokens_per_call=_int("MAX_TOKENS_PER_CALL", 512),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        max_simulation_steps=_int("MAX_SIMULATION_STEPS", 2),
+        max_llm_calls_per_run=_int("MAX_LLM_CALLS_PER_RUN", 10),
+        max_tokens_per_call=_int("MAX_TOKENS_PER_CALL", 500),
         max_tokens_per_run=_int("MAX_TOKENS_PER_RUN", 20000),
-        agent_memory_window=_int("AGENT_MEMORY_WINDOW", 8),
-        price_input_per_1m=_float("LLM_PRICE_INPUT_PER_1M", 0.15),
-        price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 0.60),
+        max_cost_usd_per_run=_float("MAX_COST_USD_PER_RUN", 0.20),
+        llm_max_retries=_int("LLM_MAX_RETRIES", 0),
+        agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
+        price_input_per_1m=_float("LLM_PRICE_INPUT_PER_1M", 0.40),
+        price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 1.60),
         request_timeout_seconds=_int("REQUEST_TIMEOUT_SECONDS", 60),
         allow_llm_mode=_bool("ALLOW_LLM_MODE", True),
         flask_host=os.getenv("FLASK_HOST", "127.0.0.1"),

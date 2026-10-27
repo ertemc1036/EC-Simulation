@@ -10,7 +10,7 @@ const agents = ref<AgentProfile[]>([])
 const sim = ref<SimulationState | null>(null)
 const scenario = ref('Sollten Online-Foren KI-gestützte Moderation einsetzen?')
 const mode = ref<'auto' | 'manual' | 'llm'>('auto')
-const maxSteps = ref(4)
+const maxSteps = ref(2)
 const busy = ref(false)
 const error = ref<string | null>(null)
 let socket: Socket | null = null
@@ -21,7 +21,7 @@ const llmBanner = computed(() => {
   if (cfg.llm_mode_available) {
     return {
       tone: 'ok' as const,
-      text: `LLM bereit (${cfg.openai_model}). Modus „llm“ / „auto“ nutzt echte OASIS LLMAction. Limits: ${cfg.max_llm_calls_per_run ?? '—'} Calls, ${cfg.max_tokens_per_run ?? '—'} Tokens/Run, Memory-Fenster ${cfg.agent_memory_window ?? '—'}.`,
+      text: `LLM bereit (${cfg.openai_model}). Modus „llm“ / „auto“ nutzt echte OASIS LLMAction. Limits: ${cfg.max_llm_calls_per_run ?? '—'} Calls, ${cfg.max_tokens_per_run ?? '—'} Tokens/Run, $${cfg.max_cost_usd_per_run ?? '—'} USD, retries=${cfg.llm_max_retries ?? '—'}, Memory-Fenster ${cfg.agent_memory_window ?? '—'}.`,
     }
   }
   return {
@@ -124,7 +124,7 @@ onUnmounted(() => {
         </label>
         <label>
           Schritte
-          <input v-model.number="maxSteps" type="number" min="1" max="8" />
+          <input v-model.number="maxSteps" type="number" min="1" max="2" />
         </label>
         <button class="cta" :disabled="busy || sim?.status === 'running'" @click="startSimulation">
           {{ sim?.status === 'running' ? 'Läuft…' : 'Simulation starten' }}
@@ -173,7 +173,10 @@ onUnmounted(() => {
         </div>
         <div>
           <span class="k">Schätzung USD</span>
-          <span class="v mono">{{ (sim.cost_summary?.estimated_cost_usd ?? 0).toFixed(6) }}</span>
+          <span class="v mono">
+            {{ (sim.cost_summary?.estimated_cost_usd ?? 0).toFixed(6) }}
+            / {{ sim.cost_summary?.max_cost_usd_per_run ?? '—' }}
+          </span>
         </div>
         <div>
           <span class="k">Limit</span>

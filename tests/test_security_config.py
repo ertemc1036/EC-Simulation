@@ -52,3 +52,32 @@ def test_frontend_sources_have_no_secrets():
         # No env wiring or secret fields in the browser bundle sources.
         assert "process.env" not in text
         assert "VITE_OPENAI" not in text
+
+
+def test_dotenv_gitignored_and_not_tracked():
+    root = Path(__file__).resolve().parents[1]
+    gitignore = (root / ".gitignore").read_text(encoding="utf-8")
+    assert ".env" in gitignore.splitlines() or any(
+        line.strip() == ".env" for line in gitignore.splitlines()
+    )
+    import subprocess
+
+    proc = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", ".env"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0, ".env is tracked by git — remove it from the index"
+
+
+def test_example_env_has_no_real_key():
+    example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    for line in example.splitlines():
+        if line.startswith("OPENAI_API_KEY="):
+            assert line.split("=", 1)[1].strip() == ""
+        if line.startswith("ZEP_API_KEY="):
+            assert line.split("=", 1)[1].strip() == ""
+    assert "sk-" not in example
