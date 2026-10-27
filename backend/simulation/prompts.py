@@ -59,11 +59,12 @@ Kommunikationsstil: {style}
 # REGELN
 1. Alle sichtbaren Beiträge (Posts/Kommentare) in der angegebenen Sprache verfassen.
 2. Jede Aktion muss Szenario und dein individuelles Ziel voranbringen — nicht die Ziele fremder Stakeholder mitzusammenfassen.
-3. Beziehe dich auf konkrete Posts im Feed (post_id). Wenn Posts sichtbar sind: bevorzugt create_comment, like_post oder dislike_post.
-4. Kein neuer create_post, der nur das Szenario erneut paraphrasiert oder alle Stakeholder auflistet — das erzeugt Duplikate.
-5. search_posts / refresh vermeiden, wenn der Feed bereits Posts mit IDs zeigt (Umgebung hat den Feed schon geladen).
-6. Like/Dislike sind legitime Debatten-Signale auf konkrete Beiträge — kein Like-Spam und keine Meta-Posts über Likes.
-7. Antworte nicht als generischer Englisch-Assistent — bleibe in Rolle und Sprache.
+3. Interaktion ohne Quoten: wenn Posts/Kommentare mit IDs sichtbar sind, bevorzugt create_comment (Reply auf post_id), like_post/dislike_post oder like_comment/dislike_comment.
+4. OASIS hat kein parent_comment_id und kein separates reply-Tool — Reply = create_comment(post_id, content) unter dem beobachteten Post.
+5. Kein neuer create_post, der nur das Szenario erneut paraphrasiert oder alle Stakeholder auflistet — das erzeugt Duplikate.
+6. search_posts / refresh vermeiden, wenn der Feed bereits Posts mit IDs zeigt (Umgebung hat den Feed schon geladen).
+7. Like/Dislike sind legitime Debatten-Signale (Zustimmung/Widerspruch) auf konkrete Beiträge — kein Like-Spam und keine Meta-Posts über Likes.
+8. Antworte nicht als generischer Englisch-Assistent — bleibe in Rolle und Sprache.
 
 # ANTWORT
 Aktionen ausschließlich per Tool-Calling ausführen.
@@ -140,26 +141,40 @@ def format_feed_context(
     max_posts: int = 8,
     max_comments: int = 6,
 ) -> str:
-    """Compact feed block with explicit post_ids for tool args."""
+    """Compact feed block with explicit post_ids / comment_ids for tool args.
+
+    OASIS reply = create_comment on post_id (no parent_comment_id). Comment
+    lines expose comment_id for like_comment / dislike_comment.
+    """
     if not posts and not comments:
         return (
             "(Noch keine Posts im Feed — du darfst create_post als "
             "Diskussionsimpuls schreiben.)"
         )
-    lines: list[str] = []
+    lines: list[str] = [
+        "Interaktionshinweis: Reply=create_comment(post_id) — kein "
+        "parent_comment_id. Zustimmung/Widerspruch=like_*/dislike_* "
+        "ohne Quoten."
+    ]
     recent = posts[-max_posts:] if posts else []
     for p in recent:
         pid = p.get("post_id")
         uid = p.get("user_id")
         content = str(p.get("content") or "").replace("\n", " ").strip()
-        lines.append(f"- Post#{pid} von Nutzer {uid}: {content[:220]}")
+        lines.append(
+            f"- Post#{pid} von Nutzer {uid} "
+            f"(reply→post_id={pid} | like/dislike_post): {content[:220]}"
+        )
     for c in (comments or [])[-max_comments:]:
         cid = c.get("comment_id")
         pid = c.get("post_id")
         uid = c.get("user_id")
         content = str(c.get("content") or "").replace("\n", " ").strip()
         lines.append(
-            f"- Kommentar#{cid}→Post#{pid} von Nutzer {uid}: {content[:160]}"
+            f"- Kommentar#{cid}→Post#{pid} von Nutzer {uid} "
+            f"(like/dislike_comment comment_id={cid}; "
+            f"weiterer Reply bleibt create_comment auf post_id={pid}): "
+            f"{content[:160]}"
         )
     return "\n".join(lines)
 
@@ -203,10 +218,12 @@ def build_decision_prompt(
         f"Szenario (verbindlich): {scenario.strip()}\n"
         f"Dein individuelles Ziel / Zielkonflikt: {goal}\n"
         f"Sprache für alle Inhalte: {lang_name} ({lang}).\n"
-        f"Priorität wenn Posts mit IDs sichtbar sind: "
-        f"create_comment, like_post oder dislike_post auf eine konkrete post_id. "
-        f"Kein search_posts/refresh und kein doppelter Essay-Post.\n"
-        f"FEED-KONTEXT (verbindliche post_ids):\n{feed}\n"
+        f"INTERAKTIONSKONTEXT: Beziehe dich auf fremde Beiträge. "
+        f"Priorität ohne Quoten: create_comment (Reply auf post_id — OASIS "
+        f"ohne parent_comment_id), like_post/dislike_post, "
+        f"like_comment/dislike_comment. Kein search_posts/refresh und kein "
+        f"doppelter Essay-Post.\n"
+        f"FEED-KONTEXT (verbindliche post_ids / comment_ids):\n{feed}\n"
         f"MEMORY-KONTEXT (dein lokales Arbeitsgedächtnis):\n{memory}\n"
         f"Beobachte den Feed und handle szenariokonform. "
         f"Kein themenfremder Content, keine Tweet-/Like-Spam-Meta-Posts.\n"

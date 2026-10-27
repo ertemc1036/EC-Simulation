@@ -1,4 +1,4 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 3."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 4."""
 from __future__ import annotations
 
 import hashlib
@@ -19,18 +19,20 @@ from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
 
-# Fingerprint of key Phase-3 modules — dashboard can detect a stale :5001 process.
-_PHASE3_MARKERS = (
+# Fingerprint of key Phase-4 modules — dashboard can detect a stale :5001 process.
+_PHASE4_MARKERS = (
     ROOT / "backend" / "app.py",
     ROOT / "backend" / "config.py",
     ROOT / "backend" / "simulation" / "engine.py",
     ROOT / "backend" / "simulation" / "agent_generator.py",
+    ROOT / "backend" / "simulation" / "knowledge_graph.py",
+    ROOT / "backend" / "simulation" / "oasis_reply.py",
 )
 
 
 def _code_revision() -> str:
     h = hashlib.sha1()
-    for path in _PHASE3_MARKERS:
+    for path in _PHASE4_MARKERS:
         try:
             h.update(path.read_bytes())
         except OSError:
@@ -39,7 +41,7 @@ def _code_revision() -> str:
 
 
 CODE_REVISION = _code_revision()
-EXPECTED_PHASE = "3"
+EXPECTED_PHASE = "4"
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": settings.cors_origins}})

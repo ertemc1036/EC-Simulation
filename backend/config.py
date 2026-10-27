@@ -179,7 +179,16 @@ class Settings:
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
-            "phase": "3",
+            "phase": "4",
+            "oasis_reply": {
+                "parent_comment_id_supported": False,
+                "reply_via": "create_comment(post_id, content)",
+                "documented_alternative": (
+                    "Reply = CREATE_COMMENT on post_id; nested comment→comment "
+                    "not supported. Agreement/disagreement = like_*/dislike_* "
+                    "without quotas."
+                ),
+            },
         }
 
 

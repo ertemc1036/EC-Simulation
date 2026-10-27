@@ -71,7 +71,7 @@ Anzahl: 1–5 (Live-Test-Ceiling aus Phase 2.x). Start-Body: `agent_count`, `age
 | `llm` | echte `OasisEnv` + `LLMAction` | OpenAI-kompatibel (`OPENAI_*`) | Calls/Tokens limitiert |
 | `auto` | wird wie `manual` behandelt (kein stilles LLM) | — | — |
 
-LLM-Interaktionen (keine Fake-Entscheidungen): Agenten lesen den Feed und wählen echte OASIS-Tools — `create_post`, `create_comment` (Reply), `like_post`, `dislike_post`, …
+LLM-Interaktionen (keine Fake-Entscheidungen): Agenten lesen den Feed und wählen echte OASIS-Tools — `create_post`, `create_comment` (Reply auf `post_id`; OASIS hat **kein** `parent_comment_id`), `like_post` / `dislike_post`, `like_comment` / `dislike_comment`, …
 
 **Modellaufrufe pro Runde:** 1 Call pro Agent. Bei 5 Agenten × 2 Runden = 10 Calls (Ceiling). Seed-`ManualAction` kostet 0 Calls.
 
@@ -81,7 +81,7 @@ LLM-Interaktionen (keine Fake-Entscheidungen): Agenten lesen den Feed und wähle
 
 - **Lokal:** `LocalAgentMemory` (Ringpuffer je Agent) + CAMEL `ChatHistoryMemory(window_size=AGENT_MEMORY_WINDOW)`
 - **Zep:** Stub unter `backend/zep/` — **nicht integriert**; Handoff-Form vorbereitet
-- **Graph:** lokale Knoten (Akteure / Themen / Aussagen) + Kanten (posted, commented, replies_to, liked, …) im Dashboard
+- **Graph:** lokale Knoten (Akteure / Themen / Aussagen) + Interaktionskanten nur belegt (`replied_to`, `agrees_with`, `disagrees_with`) im Dashboard
 
 ## Verhalten ohne API-Key
 

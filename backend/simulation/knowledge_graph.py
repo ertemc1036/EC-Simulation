@@ -2,6 +2,11 @@
 
 Built offline from simulation state (agents + posts + comments + reactions).
 No external graph DB — dashboard-ready JSON only.
+
+Phase 4 interaction edges (only when evidenced by platform actions/DB rows):
+- ``replied_to`` — actor → post statement (via create_comment)
+- ``agrees_with`` — actor → post/comment statement (via like_*)
+- ``disagrees_with`` — actor → post/comment statement (via dislike_*)
 """
 from __future__ import annotations
 
@@ -11,6 +16,9 @@ from typing import Any
 
 from backend.simulation.agents import AgentProfile
 from backend.simulation.agent_generator import extract_scenario_keywords
+
+# Phase-4 interaction relations — never invent these without evidence.
+INTERACTION_RELATIONS = frozenset({"replied_to", "agrees_with", "disagrees_with"})
 
 
 @dataclass
@@ -153,6 +161,7 @@ class LocalKnowledgeGraph:
                 )
             self.add_edge(sid, scenario_node.id, "about")
 
+        comment_statement: dict[int, str] = {}
         for c in comments:
             cid = c.get("comment_id")
             if cid is None:
@@ -168,6 +177,7 @@ class LocalKnowledgeGraph:
                 user_id=c.get("user_id"),
                 statement_kind="comment",
             )
+            comment_statement[int(cid)] = sid
             uid = c.get("user_id")
             if uid is not None and int(uid) in agent_nodes:
                 self.add_edge(
@@ -176,8 +186,20 @@ class LocalKnowledgeGraph:
                     "commented",
                     comment_id=cid,
                 )
+                # Phase 4: evidenced reply (OASIS = comment under post_id).
+                parent_pid = c.get("post_id")
+                if parent_pid is not None and int(parent_pid) in post_statement:
+                    self.add_edge(
+                        agent_nodes[int(uid)],
+                        post_statement[int(parent_pid)],
+                        "replied_to",
+                        comment_id=cid,
+                        post_id=parent_pid,
+                        evidence="create_comment",
+                    )
             parent_pid = c.get("post_id")
             if parent_pid is not None and int(parent_pid) in post_statement:
+                # Structural statement→statement link (flat OASIS thread).
                 self.add_edge(
                     sid,
                     post_statement[int(parent_pid)],
@@ -189,41 +211,117 @@ class LocalKnowledgeGraph:
         for r in reactions:
             rtype = str(r.get("type") or "like").lower()
             uid = r.get("user_id")
+            if uid is None or int(uid) not in agent_nodes:
+                continue
+            target: str | None = None
+            evidence = rtype
+            meta: dict[str, Any] = {"reaction": rtype}
             pid = r.get("post_id")
-            if uid is None or pid is None:
-                continue
-            if int(uid) not in agent_nodes:
-                continue
-            target = post_statement.get(int(pid))
+            cid = r.get("comment_id")
+            if pid is not None and int(pid) in post_statement:
+                target = post_statement[int(pid)]
+                meta["post_id"] = pid
+                evidence = f"{rtype}_post"
+            elif cid is not None and int(cid) in comment_statement:
+                target = comment_statement[int(cid)]
+                meta["comment_id"] = cid
+                evidence = f"{rtype}_comment"
             if not target:
-                # Still record actor→topic signal even if post missing.
-                target = scenario_node.id
-            relation = "liked" if "dislike" not in rtype else "disliked"
+                continue
+            if "dislike" in rtype:
+                relation = "disagrees_with"
+            else:
+                relation = "agrees_with"
+            meta["evidence"] = evidence
             self.add_edge(
                 agent_nodes[int(uid)],
                 target,
                 relation,
-                reaction=rtype,
-                post_id=pid,
+                **meta,
             )
 
-        # Optional: follow edges from action log
+        # Optional: follow edges + interaction edges from action_log when DB
+        # reactions lagged (still evidence-gated by concrete tool args).
         for entry in action_log or []:
-            if entry.get("action_type") != "follow":
-                continue
+            action = str(entry.get("action_type") or "")
             aid = entry.get("agent_id")
             args = entry.get("action_args") or {}
-            if not isinstance(args, dict):
+            if not isinstance(args, dict) or aid is None:
                 continue
-            followee = args.get("followee_id")
-            if aid is None or followee is None:
+            if int(aid) not in agent_nodes:
                 continue
-            if int(aid) in agent_nodes and int(followee) in agent_nodes:
-                self.add_edge(
-                    agent_nodes[int(aid)],
-                    agent_nodes[int(followee)],
-                    "follows",
+            if action == "follow":
+                followee = args.get("followee_id")
+                if followee is not None and int(followee) in agent_nodes:
+                    self.add_edge(
+                        agent_nodes[int(aid)],
+                        agent_nodes[int(followee)],
+                        "follows",
+                    )
+                continue
+            # Only add interaction edges if not already present from DB rows.
+            if action == "create_comment":
+                pid = args.get("post_id")
+                if pid is not None and int(pid) in post_statement:
+                    eid = (
+                        f"replied_to:{agent_nodes[int(aid)]}->"
+                        f"{post_statement[int(pid)]}"
+                    )
+                    if eid not in self.edges:
+                        self.add_edge(
+                            agent_nodes[int(aid)],
+                            post_statement[int(pid)],
+                            "replied_to",
+                            edge_id=eid,
+                            post_id=pid,
+                            evidence="action_log:create_comment",
+                        )
+            elif action in {"like_post", "dislike_post"}:
+                pid = args.get("post_id")
+                if pid is None or int(pid) not in post_statement:
+                    continue
+                relation = (
+                    "agrees_with" if action == "like_post" else "disagrees_with"
                 )
+                eid = f"{relation}:{agent_nodes[int(aid)]}->{post_statement[int(pid)]}"
+                if eid not in self.edges:
+                    self.add_edge(
+                        agent_nodes[int(aid)],
+                        post_statement[int(pid)],
+                        relation,
+                        edge_id=eid,
+                        post_id=pid,
+                        evidence=f"action_log:{action}",
+                    )
+            elif action in {"like_comment", "dislike_comment"}:
+                cid = args.get("comment_id")
+                if cid is None or int(cid) not in comment_statement:
+                    continue
+                relation = (
+                    "agrees_with"
+                    if action == "like_comment"
+                    else "disagrees_with"
+                )
+                eid = (
+                    f"{relation}:{agent_nodes[int(aid)]}->"
+                    f"{comment_statement[int(cid)]}"
+                )
+                if eid not in self.edges:
+                    self.add_edge(
+                        agent_nodes[int(aid)],
+                        comment_statement[int(cid)],
+                        relation,
+                        edge_id=eid,
+                        comment_id=cid,
+                        evidence=f"action_log:{action}",
+                    )
+
+    def interaction_counts(self) -> dict[str, int]:
+        counts = {r: 0 for r in sorted(INTERACTION_RELATIONS)}
+        for e in self.edges.values():
+            if e.relation in counts:
+                counts[e.relation] += 1
+        return counts
 
     def to_dict(self) -> dict[str, Any]:
         nodes = [n.to_dict() for n in self.nodes.values()]
@@ -234,17 +332,21 @@ class LocalKnowledgeGraph:
         by_rel: dict[str, int] = {}
         for e in edges:
             by_rel[e["relation"]] = by_rel.get(e["relation"], 0) + 1
+        interaction = self.interaction_counts()
         return {
             "backend": "local",
             "node_count": len(nodes),
             "edge_count": len(edges),
             "counts_by_kind": by_kind,
             "counts_by_relation": by_rel,
+            "interaction_relations": interaction,
             "nodes": nodes,
             "edges": edges,
             "note": (
-                "Lokaler Wissensgraph (Akteure / Themen / Aussagen / Beziehungen). "
-                "Kein externes Graph-Backend."
+                "Lokaler Wissensgraph (Akteure / Themen / Aussagen). "
+                "Phase-4 Interaktionskanten replied_to / agrees_with / "
+                "disagrees_with nur bei belegter Plattform-Aktion. "
+                "Kein externes Graph-Backend. OASIS: kein parent_comment_id."
             ),
         }
 

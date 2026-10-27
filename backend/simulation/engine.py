@@ -41,6 +41,7 @@ from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.knowledge_graph import LocalKnowledgeGraph
 from backend.simulation.local_memory import LocalAgentMemory
 from backend.simulation.manual_script import build_manual_rounds
+from backend.simulation.oasis_reply import oasis_reply_status
 from backend.simulation.prompt_debug import (
     PROMPT_BUNDLE_ID,
     PromptDebugBuffer,
@@ -82,8 +83,49 @@ def _context_limit_for_agent_model(model: Any) -> int:
         return resolve_context_token_limit(inner)
     return DEFAULT_CONTEXT_TOKEN_LIMIT
 
-# Explicit OASIS Reddit interaction set for Phase-3.5 LLMAction runs.
-# Reply = CREATE_COMMENT on an observed post (no separate reply ActionType).
+
+def _empty_interaction_summary() -> dict[str, Any]:
+    return {
+        "replied_to": 0,
+        "agrees_with": 0,
+        "disagrees_with": 0,
+        "comments": 0,
+        "post_reactions": 0,
+        "comment_reactions": 0,
+        "note": (
+            "Nur belegte Interaktionen (create_comment / like_* / dislike_*). "
+            "OASIS: kein parent_comment_id."
+        ),
+    }
+
+
+def _build_interaction_summary(
+    *,
+    comments: list[dict[str, Any]],
+    reactions: list[dict[str, Any]],
+    knowledge_graph: dict[str, Any],
+) -> dict[str, Any]:
+    """Dashboard-facing counts; graph interaction_relations are source of truth."""
+    ir = knowledge_graph.get("interaction_relations") or {}
+    post_rx = sum(1 for r in reactions if r.get("post_id") is not None)
+    comment_rx = sum(1 for r in reactions if r.get("comment_id") is not None)
+    return {
+        "replied_to": int(ir.get("replied_to") or 0),
+        "agrees_with": int(ir.get("agrees_with") or 0),
+        "disagrees_with": int(ir.get("disagrees_with") or 0),
+        "comments": len(comments),
+        "post_reactions": post_rx,
+        "comment_reactions": comment_rx,
+        "note": (
+            "Nur belegte Interaktionen (create_comment / like_* / dislike_*). "
+            "OASIS: kein parent_comment_id — Reply = create_comment(post_id)."
+        ),
+    }
+
+
+# Explicit OASIS Reddit interaction set for Phase-4 LLMAction runs.
+# Reply = CREATE_COMMENT on an observed post_id — OASIS has no parent_comment_id
+# and no separate reply ActionType (see oasis_reply.py).
 # SEARCH_POSTS / REFRESH removed: OASIS already refreshes inside to_text_prompt,
 # and those tools produced empty interaction (no comments/reactions) in live runs.
 # comment / like / dislike stay available without quotas.
@@ -135,6 +177,8 @@ class SimulationState:
     cost_summary: dict[str, Any] = field(default_factory=dict)
     agent_memory: dict[str, Any] = field(default_factory=dict)
     knowledge_graph: dict[str, Any] = field(default_factory=dict)
+    interaction_summary: dict[str, Any] = field(default_factory=dict)
+    oasis_reply: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     result_path: str | None = None
     db_path: str | None = None
@@ -165,6 +209,8 @@ class SimulationState:
             "cost_summary": self.cost_summary,
             "agent_memory": self.agent_memory,
             "knowledge_graph": self.knowledge_graph,
+            "interaction_summary": self.interaction_summary,
+            "oasis_reply": self.oasis_reply,
             "error": self.error,
             "result_path": self.result_path,
             "db_path": self.db_path,
@@ -438,6 +484,7 @@ class SimulationEngine:
             self._agent_generation = gen_mode
             self._run_agents = run_agents
             self._agent_profiles = {p.agent_id: p for p in run_agents}
+            reply_meta = oasis_reply_status()
             self.state = SimulationState(
                 run_id=run_id,
                 status="running",
@@ -452,6 +499,8 @@ class SimulationEngine:
                 agents=agent_dicts,
                 agent_memory=self._local_memory.snapshot(),
                 knowledge_graph=self._knowledge_graph.to_dict(),
+                interaction_summary=_empty_interaction_summary(),
+                oasis_reply=reply_meta,
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -1048,7 +1097,7 @@ class SimulationEngine:
                 comments = []
             try:
                 likes = [
-                    {"type": "like", **dict(r)}
+                    {"type": "like", "target": "post", **dict(r)}
                     for r in con.execute(
                         "SELECT like_id, user_id, post_id, created_at FROM like"
                     )
@@ -1057,13 +1106,47 @@ class SimulationEngine:
                 likes = []
             try:
                 dislikes = [
-                    {"type": "dislike", **dict(r)}
+                    {"type": "dislike", "target": "post", **dict(r)}
                     for r in con.execute(
                         "SELECT dislike_id, user_id, post_id, created_at FROM dislike"
                     )
                 ]
             except sqlite3.OperationalError:
                 dislikes = []
+            try:
+                comment_likes = [
+                    {
+                        "type": "like",
+                        "target": "comment",
+                        "comment_like_id": r["comment_like_id"],
+                        "user_id": r["user_id"],
+                        "comment_id": r["comment_id"],
+                        "created_at": r["created_at"],
+                    }
+                    for r in con.execute(
+                        "SELECT comment_like_id, user_id, comment_id, created_at "
+                        "FROM comment_like"
+                    )
+                ]
+            except sqlite3.OperationalError:
+                comment_likes = []
+            try:
+                comment_dislikes = [
+                    {
+                        "type": "dislike",
+                        "target": "comment",
+                        "comment_dislike_id": r["comment_dislike_id"],
+                        "user_id": r["user_id"],
+                        "comment_id": r["comment_id"],
+                        "created_at": r["created_at"],
+                    }
+                    for r in con.execute(
+                        "SELECT comment_dislike_id, user_id, comment_id, created_at "
+                        "FROM comment_dislike"
+                    )
+                ]
+            except sqlite3.OperationalError:
+                comment_dislikes = []
             try:
                 traces = [
                     dict(r)
@@ -1080,7 +1163,9 @@ class SimulationEngine:
         with self._lock:
             self.state.posts = posts
             self.state.comments = comments
-            self.state.reactions = likes + dislikes
+            self.state.reactions = (
+                likes + dislikes + comment_likes + comment_dislikes
+            )
             if merge_llm_traces and traces:
                 # Normalize dict vs JSON-string args (and create_post content) so
                 # seed ManualAction / decision_hook entries are not re-imported.
@@ -1168,6 +1253,12 @@ class SimulationEngine:
         )
         self.state.agent_memory = self._local_memory.snapshot()
         self.state.knowledge_graph = self._knowledge_graph.to_dict()
+        self.state.interaction_summary = _build_interaction_summary(
+            comments=self.state.comments,
+            reactions=self.state.reactions,
+            knowledge_graph=self.state.knowledge_graph,
+        )
+        self.state.oasis_reply = oasis_reply_status()
 
     def _persist_results(self, db_path: Path) -> Path:
         self._refresh_from_db(db_path)
@@ -1196,13 +1287,14 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 3,
+                "phase": 4,
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
                 "agent_memory_window": self.cfg.agent_memory_window,
                 "agent_local_memory_entries": self.cfg.agent_local_memory_entries,
                 "zep_integrated": False,
                 "knowledge_graph_backend": "local",
+                "oasis_reply": oasis_reply_status(),
                 "model_calls_per_round_required": model_calls_required_per_round(
                     agents_n
                 ),
@@ -1222,6 +1314,8 @@ class SimulationEngine:
             "cost_summary": self.state.cost_summary,
             "agent_memory": self.state.agent_memory,
             "knowledge_graph": self.state.knowledge_graph,
+            "interaction_summary": self.state.interaction_summary,
+            "oasis_reply": self.state.oasis_reply or oasis_reply_status(),
             "db_path": str(db_path),
         }
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

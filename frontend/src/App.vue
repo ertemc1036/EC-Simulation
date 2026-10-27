@@ -48,19 +48,36 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-3) shows Phase — and Alice…Eve despite dynamic. */
+/** Stale Flask on :5001 (pre-Phase-4) misses interaction / oasis_reply fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
   const hasRevision = Boolean(h.runtime?.code_revision)
   const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
-  if (phase === '3' && hasRevision && hasGenModes) return null
+  const hasOasisReply = Boolean(h.config?.oasis_reply)
+  if (phase === '4' && hasRevision && hasGenModes && hasOasisReply) return null
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 3 oder fehlende Phase-3-Felder). ' +
-      'Flask auf Port 5001 neu starten, sonst bleiben Alice…Eve, leeres Memory/KG und Phase —.',
+      'Backend wirkt veraltet (Phase ≠ 4 oder fehlende Phase-4-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst fehlen Interaktionsgraph / oasis_reply.',
+  }
+})
+
+const interactionSummary = computed(() => {
+  const s = sim.value?.interaction_summary
+  if (!s) return null
+  return s
+})
+
+const oasisReplyNote = computed(() => {
+  const r = sim.value?.oasis_reply || health.value?.config?.oasis_reply
+  if (!r) return null
+  return {
+    parent: r.parent_comment_id_supported === false ? 'nein' : '?',
+    via: r.reply_via || 'create_comment(post_id, content)',
+    alt: r.documented_alternative || '',
   }
 })
 
@@ -214,8 +231,8 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Dynamische Multi-Agent-Simulation (MiroFish-ähnlich) in einer echten
-        camel-oasis-Umgebung — Profile, Feed, Memory und Relationen live.
+        Phase-4 Multi-Agent Interaction Engine in einer echten camel-oasis-
+        Umgebung — Kontext, Konflikte, Memory und belegte Relationen live.
       </p>
     </header>
 
@@ -528,7 +545,21 @@ onUnmounted(() => {
         <h2>Relations</h2>
         <p class="lede-sm" v-if="graphSummary">
           {{ graphSummary.nodes }} Knoten · {{ graphSummary.edges }} Kanten —
-          Akteure / Themen / Aussagen / Beziehungen.
+          Interaktion nur belegt: replied_to / agrees_with / disagrees_with.
+        </p>
+        <ul class="meta-list" v-if="interactionSummary">
+          <li>replied_to: {{ interactionSummary.replied_to }}</li>
+          <li>agrees_with: {{ interactionSummary.agrees_with }}</li>
+          <li>disagrees_with: {{ interactionSummary.disagrees_with }}</li>
+          <li>Kommentare: {{ interactionSummary.comments }}</li>
+          <li>
+            Reaktionen: Post {{ interactionSummary.post_reactions }} ·
+            Kommentar {{ interactionSummary.comment_reactions }}
+          </li>
+        </ul>
+        <p class="lede-sm" v-if="oasisReplyNote">
+          OASIS Reply-API: parent_comment_id={{ oasisReplyNote.parent }} ·
+          Reply via {{ oasisReplyNote.via }}
         </p>
         <ul class="meta-list" v-if="graphSummary">
           <li v-for="(n, k) in graphSummary.kinds" :key="'k' + k">{{ k }}: {{ n }}</li>
