@@ -25,6 +25,13 @@ def _int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return float(raw)
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str
@@ -33,6 +40,10 @@ class Settings:
     max_simulation_steps: int
     max_llm_calls_per_run: int
     max_tokens_per_call: int
+    max_tokens_per_run: int
+    agent_memory_window: int
+    price_input_per_1m: float
+    price_output_per_1m: float
     request_timeout_seconds: int
     allow_llm_mode: bool
     flask_host: str
@@ -55,6 +66,7 @@ class Settings:
         return self.allow_llm_mode and self.llm_configured
 
     def status_payload(self) -> dict:
+        """Public status — never includes API keys."""
         return {
             "llm_configured": self.llm_configured,
             "llm_mode_available": self.llm_mode_available,
@@ -73,10 +85,15 @@ class Settings:
             "max_simulation_steps": self.max_simulation_steps,
             "max_llm_calls_per_run": self.max_llm_calls_per_run,
             "max_tokens_per_call": self.max_tokens_per_call,
+            "max_tokens_per_run": self.max_tokens_per_run,
+            "agent_memory_window": self.agent_memory_window,
+            "price_input_per_1m_usd": self.price_input_per_1m,
+            "price_output_per_1m_usd": self.price_output_per_1m,
             "zep_enabled": self.zep_enabled,
             "zep_configured": bool(self.zep_api_key.strip()),
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
+            "api_key_exposed": False,
         }
 
 
@@ -98,6 +115,10 @@ def load_settings() -> Settings:
         max_simulation_steps=_int("MAX_SIMULATION_STEPS", 8),
         max_llm_calls_per_run=_int("MAX_LLM_CALLS_PER_RUN", 40),
         max_tokens_per_call=_int("MAX_TOKENS_PER_CALL", 512),
+        max_tokens_per_run=_int("MAX_TOKENS_PER_RUN", 20000),
+        agent_memory_window=_int("AGENT_MEMORY_WINDOW", 8),
+        price_input_per_1m=_float("LLM_PRICE_INPUT_PER_1M", 0.15),
+        price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 0.60),
         request_timeout_seconds=_int("REQUEST_TIMEOUT_SECONDS", 60),
         allow_llm_mode=_bool("ALLOW_LLM_MODE", True),
         flask_host=os.getenv("FLASK_HOST", "127.0.0.1"),

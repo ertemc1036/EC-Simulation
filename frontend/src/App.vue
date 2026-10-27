@@ -21,16 +21,22 @@ const llmBanner = computed(() => {
   if (cfg.llm_mode_available) {
     return {
       tone: 'ok' as const,
-      text: `LLM bereit (${cfg.openai_model}). Modus „llm“ oder „auto“ nutzt OASIS LLMAction.`,
+      text: `LLM bereit (${cfg.openai_model}). Modus „llm“ / „auto“ nutzt echte OASIS LLMAction. Limits: ${cfg.max_llm_calls_per_run ?? '—'} Calls, ${cfg.max_tokens_per_run ?? '—'} Tokens/Run, Memory-Fenster ${cfg.agent_memory_window ?? '—'}.`,
     }
   }
   return {
     tone: 'warn' as const,
     text:
       cfg.llm_mode_blocked_reason ||
-      'Kein OPENAI_API_KEY — Simulation nur im ManualAction-Modus (echte OASIS-Umgebung, StubModel, keine API-Calls).',
+      'Kein API-Key konfiguriert — Simulation nur im ManualAction-Modus (echte OASIS-Umgebung, StubModel, keine API-Calls).',
   }
 })
+
+function sourceClass(source?: string) {
+  if (source === 'LLMAction') return 'src-llm'
+  if (source === 'ManualAction') return 'src-manual'
+  return 'src-other'
+}
 
 async function refreshHealth() {
   const res = await fetch(`${API}/api/health`)
@@ -113,7 +119,7 @@ onUnmounted(() => {
           <select v-model="mode">
             <option value="auto">auto (LLM falls Key, sonst Manual)</option>
             <option value="manual">manual (StubModel, keine LLM-Calls)</option>
-            <option value="llm">llm (benötigt OPENAI_API_KEY)</option>
+            <option value="llm">llm (benötigt API-Key im Backend-.env)</option>
           </select>
         </label>
         <label>
@@ -134,7 +140,9 @@ onUnmounted(() => {
       </div>
       <div>
         <span class="k">Modus</span>
-        <span class="v">{{ sim.mode }}</span>
+        <span class="v mode-pill" :class="sim.mode === 'llm' ? 'mode-llm' : 'mode-manual'">
+          {{ sim.mode === 'llm' ? 'LLMAction' : 'ManualAction' }}
+        </span>
       </div>
       <div>
         <span class="k">Schritt</span>
@@ -146,6 +154,42 @@ onUnmounted(() => {
       </div>
       <p class="msg">{{ sim.message }}</p>
       <p v-if="sim.error" class="err">{{ sim.error }}</p>
+    </section>
+
+    <section class="cost-strip" v-if="sim && (sim.mode === 'llm' || sim.model_calls?.length)">
+      <h2>Modellaufrufe & Kosten</h2>
+      <p class="lede-sm">
+        Getrennt vom Aktionsprotokoll: echte/injizierte Modellaufrufe, Tokens und
+        Kostenschätzung — nicht die simulierten Platform-Aktionen.
+      </p>
+      <div class="cost-grid">
+        <div>
+          <span class="k">API-Calls</span>
+          <span class="v">{{ sim.cost_summary?.api_calls ?? 0 }} / {{ sim.cost_summary?.max_llm_calls_per_run ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Tokens</span>
+          <span class="v">{{ sim.cost_summary?.total_tokens ?? 0 }} / {{ sim.cost_summary?.max_tokens_per_run ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Schätzung USD</span>
+          <span class="v mono">{{ (sim.cost_summary?.estimated_cost_usd ?? 0).toFixed(6) }}</span>
+        </div>
+        <div>
+          <span class="k">Limit</span>
+          <span class="v">{{ sim.cost_summary?.limit_hit || '—' }}</span>
+        </div>
+      </div>
+      <ol class="log calls" v-if="sim.model_calls?.length">
+        <li v-for="c in sim.model_calls" :key="c.call_id">
+          <span class="badge src-llm">model</span>
+          #{{ c.call_id }} · agent {{ c.agent_id ?? '-' }} ·
+          {{ c.prompt_tokens }}+{{ c.completion_tokens }} tok ·
+          ${{ c.estimated_cost_usd.toFixed(6) }}
+          <span class="src">({{ c.source }}{{ c.ok ? '' : ' · fail' }})</span>
+        </li>
+      </ol>
+      <p v-else class="empty">Keine Modellaufrufe in diesem Lauf.</p>
     </section>
 
     <section class="grid">
@@ -185,11 +229,18 @@ onUnmounted(() => {
 
       <div>
         <h2>Aktionsprotokoll</h2>
+        <p class="lede-sm">
+          <span class="badge src-manual">ManualAction</span>
+          skriptierte Platform-Aktion ·
+          <span class="badge src-llm">LLMAction</span>
+          KI-Entscheidung (OASIS)
+        </p>
         <ol class="log" v-if="sim?.action_log?.length">
           <li v-for="(e, i) in sim.action_log" :key="i">
+            <span class="badge" :class="sourceClass(e.source)">{{ e.source || '?' }}</span>
             <span class="mono">s{{ e.step ?? '-' }}</span>
             agent {{ e.agent_id }} · {{ e.action_type }}
-            <span class="src">({{ e.source }})</span>
+            <span class="src" v-if="e.kind">· {{ e.kind }}</span>
           </li>
         </ol>
         <p v-else class="empty">Noch keine Aktionen.</p>
@@ -200,6 +251,7 @@ onUnmounted(() => {
           <li>camel-oasis {{ health.versions['camel-oasis'] }}</li>
           <li>camel-ai {{ health.versions['camel-ai'] }}</li>
           <li>mcp {{ health.versions.mcp }}</li>
+          <li>API-Key im Frontend: {{ health.config.api_key_exposed === false ? 'nein' : '?' }}</li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
       </div>
@@ -333,7 +385,50 @@ input {
   gap: 0.75rem 1rem;
   padding: 1rem 0 1.4rem;
   border-bottom: 1px solid var(--line);
+  margin-bottom: 1.25rem;
+}
+
+.cost-strip {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1.25rem;
   margin-bottom: 1.5rem;
+  animation: rise 0.9s ease both 0.16s;
+}
+
+.cost-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.lede-sm {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.4;
+}
+
+.mode-pill.mode-llm,
+.badge.src-llm {
+  color: var(--accent);
+}
+
+.mode-pill.mode-manual,
+.badge.src-manual {
+  color: var(--warn);
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-right: 0.35rem;
+}
+
+.badge.src-other {
+  color: var(--muted);
 }
 
 .k {
@@ -457,7 +552,8 @@ h2 {
 @media (max-width: 900px) {
   .grid,
   .row,
-  .status-strip {
+  .status-strip,
+  .cost-grid {
     grid-template-columns: 1fr;
   }
 }

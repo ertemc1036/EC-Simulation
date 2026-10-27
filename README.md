@@ -1,12 +1,14 @@
-# EC-Simulation (Phase 1)
+# EC-Simulation (Phase 2)
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
+
+Phase 1: echte `ManualAction`-Läufe. Phase 2: echte OASIS `LLMAction` mit OpenAI-kompatiblem Modell, Zielen, begrenztem Erinnerungskontext, Kostenlimits und getrennter Protokollierung von Modellaufrufen vs. Platform-Aktionen.
 
 ## Voraussetzungen
 
 - Python **3.11** (OASIS: `>=3.10,<3.12`)
 - Node.js 20+ (für Frontend)
-- Lokales `.venv` im Projektroot (bereits vorhanden)
+- Lokales `.venv` im Projektroot
 
 ## Wichtige Package-Pins
 
@@ -26,8 +28,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Optional: OPENAI_API_KEY setzen für LLM-Modus
+# Optional: OPENAI_API_KEY setzen für echten LLM-Modus
 # Ohne Key: ManualAction-Modus (echte OASIS-Env, StubModel, keine API-Calls)
+# LLM-Modus ohne Key → blocked (keine Fake-KI)
 
 cd frontend && npm install && cd ..
 ```
@@ -51,21 +54,31 @@ npm run dev
 # → http://127.0.0.1:5173
 ```
 
+## ManualAction vs LLMAction
+
+| Modus | Engine | Modell | Kosten |
+|-------|--------|--------|--------|
+| `manual` | echte `OasisEnv` + `ManualAction` | CAMEL StubModel | keine API-Calls |
+| `llm` | echte `OasisEnv` + `LLMAction` | OpenAI-kompatibel (`OPENAI_*`) | Calls/Tokens limitiert |
+| `auto` | LLM falls Key + `ALLOW_LLM_MODE`, sonst Manual | — | — |
+
+Dashboard kennzeichnet Quellen im Aktionsprotokoll und führt **Modellaufrufe/Kosten** getrennt.
+
 ## Verhalten ohne API-Key
 
-- Dashboard zeigt klar: **Kein API-Key / ManualAction-Modus**
-- Simulation startet mit `mode=manual` oder `auto` über echte `oasis.ManualAction` + `OasisEnv.step`
-- Keine Fake-DB, keine vorgetäuschten LLM-Antworten
-- `mode=llm` ohne Key → Status `blocked` mit Begründung
+- Dashboard: **Kein API-Key / ManualAction-Modus**
+- `mode=manual` / `auto` → echte ManualAction-Simulation
+- `mode=llm` → Status `blocked`, keine Simulation, keine Fake-Antworten
+- API-Keys erscheinen nie im Frontend und nicht in `/api/health`
 
 ## API (Kurz)
 
-- `GET /api/health` — OASIS-Import, Versionen, LLM/Zep-Status
-- `GET /api/agents` — fünf Agentenprofile
+- `GET /api/health` — OASIS-Import, Versionen, LLM/Zep-Status (ohne Secrets)
+- `GET /api/agents` — fünf Agentenprofile inkl. Ziele
 - `POST /api/simulation/start` — `{ "scenario", "mode": "auto|manual|llm", "max_steps" }`
-- `GET /api/simulation` — Live-State
-- `GET /api/results` — gespeicherte JSON-Läufe unter `data/results/`
-- Socket.IO Event `simulation_update` für Live-Updates
+- `GET /api/simulation` — Live-State inkl. `action_log`, `model_calls`, `cost_summary`
+- `GET /api/results` — JSON-Läufe unter `data/results/`
+- Socket.IO Event `simulation_update`
 
 ## Tests
 
@@ -75,14 +88,19 @@ source .venv/bin/activate
 pytest -q
 ```
 
-## Zep
-
-Stub unter `backend/zep/` — keine Pflicht-Calls. Aktivierung später via `ZEP_ENABLED=true` + `ZEP_API_KEY` (optional `pip install zep-cloud`).
+LLM-Pfad-Tests nutzen eine injizierte `ScriptedReactiveModel` (echte `LLMAction`, **keine** Provider-Calls). Echter OpenAI-Lauf braucht Key + explizite Freigabe.
 
 ## Kosten-/Sicherheitslimits (`.env`)
 
 - `MAX_SIMULATION_STEPS` (Default 8)
 - `MAX_LLM_CALLS_PER_RUN` (Default 40)
 - `MAX_TOKENS_PER_CALL` (Default 512)
+- `MAX_TOKENS_PER_RUN` (Default 20000)
+- `AGENT_MEMORY_WINDOW` (Default 8)
+- `LLM_PRICE_INPUT_PER_1M` / `LLM_PRICE_OUTPUT_PER_1M` (Dashboard-Schätzung)
 - `REQUEST_TIMEOUT_SECONDS`
 - `ALLOW_LLM_MODE`
+
+## Zep
+
+Stub unter `backend/zep/` — keine Pflicht-Calls. Aktivierung später via `ZEP_ENABLED=true` + `ZEP_API_KEY`.
