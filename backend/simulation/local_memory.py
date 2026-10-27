@@ -65,6 +65,15 @@ class LocalAgentMemory:
     def for_agent(self, agent_id: int) -> list[dict[str, Any]]:
         return [e.to_dict() for e in self._by_agent.get(int(agent_id), [])]
 
+    def recent_for_prompt(
+        self, agent_id: int, *, limit: int = 6
+    ) -> list[dict[str, Any]]:
+        """Last N entries for decision-prompt injection (traceable memory)."""
+        entries = self.for_agent(agent_id)
+        if limit <= 0:
+            return []
+        return entries[-limit:]
+
     def snapshot(self) -> dict[str, Any]:
         agents = {
             str(aid): [e.to_dict() for e in entries]

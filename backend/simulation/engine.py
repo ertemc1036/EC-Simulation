@@ -49,6 +49,8 @@ from backend.simulation.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
     build_decision_prompt,
     build_profile_for_template,
+    format_feed_context,
+    format_memory_context,
     language_display_name,
     model_calls_required_per_round,
     normalize_language,
@@ -56,8 +58,11 @@ from backend.simulation.prompts import (
 from backend.simulation.tracked_model import TrackedModelBackend
 from backend.zep.client import ZepMemoryStub
 
-# Explicit OASIS Reddit interaction set for Phase-3 LLMAction runs.
+# Explicit OASIS Reddit interaction set for Phase-3.5 LLMAction runs.
 # Reply = CREATE_COMMENT on an observed post (no separate reply ActionType).
+# SEARCH_POSTS / REFRESH removed: OASIS already refreshes inside to_text_prompt,
+# and those tools produced empty interaction (no comments/reactions) in live runs.
+# comment / like / dislike stay available without quotas.
 LLM_INTERACTION_ACTIONS = [
     ActionType.CREATE_POST,
     ActionType.CREATE_COMMENT,
@@ -65,8 +70,6 @@ LLM_INTERACTION_ACTIONS = [
     ActionType.DISLIKE_POST,
     ActionType.LIKE_COMMENT,
     ActionType.DISLIKE_COMMENT,
-    ActionType.SEARCH_POSTS,
-    ActionType.REFRESH,
     ActionType.DO_NOTHING,
     ActionType.FOLLOW,
 ]
@@ -594,14 +597,24 @@ class SimulationEngine:
 
         async def perform_action_by_llm_bound():
             env_prompt = await agent.env.to_text_prompt()
-            # Strip OASIS env_template like-bait residue from the observed blob
-            # by wrapping it — our decision prompt forbids tweet/like spam.
+            # Engine-owned feed + memory (traceable) — OASIS env buries posts
+            # after empty group-chat noise and ends with like-bait.
+            with engine._lock:
+                posts_snap = list(engine.state.posts)
+                comments_snap = list(engine.state.comments)
+            feed_context = format_feed_context(posts_snap, comments_snap)
+            memory_entries = engine._local_memory.recent_for_prompt(
+                profile.agent_id, limit=6
+            )
+            memory_context = format_memory_context(memory_entries)
             user_content = build_decision_prompt(
                 scenario=scenario,
                 goal=profile.goal,
                 language=language,
                 env_prompt=env_prompt,
                 agent_name=profile.name,
+                feed_context=feed_context,
+                memory_context=memory_context,
             )
             user_msg = BaseMessage.make_user_message(
                 role_name="User",
@@ -614,6 +627,8 @@ class SimulationEngine:
                 "scenario": scenario,
                 "language": language,
                 "env_preview": (env_prompt or "")[:400],
+                "feed_context_preview": feed_context[:500],
+                "memory_context_preview": memory_context[:500],
                 "ts": _utc_now(),
             }
             try:
@@ -657,7 +672,7 @@ class SimulationEngine:
                         "prompt_bundle_id": PROMPT_BUNDLE_ID,
                         "prompt_evidence": evidence.to_dict() if evidence else None,
                         "note": (
-                            "scenario+goal+language injected; "
+                            "scenario+goal+language+feed+memory injected; "
                             "OASIS default decision prompt bypassed"
                         ),
                     }

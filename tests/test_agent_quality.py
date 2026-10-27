@@ -68,10 +68,16 @@ def test_decision_prompt_includes_scenario_and_goal():
         language="de",
         env_prompt="After refreshing, you see some posts []",
         agent_name="Alice Analyst",
+        feed_context="- Post#1 von Nutzer 0: Seed",
+        memory_context="- [s0|action] Seed geschrieben",
     )
     assert "KI-Moderation?" in text
     assert "Fakten prüfen" in text
     assert "Alice Analyst" in text
+    assert "FEED-KONTEXT" in text
+    assert "MEMORY-KONTEXT" in text
+    assert "Post#1" in text
+    assert "create_comment" in text
     assert "don't limit your actions for example to just like" not in text
     assert "Deutsch" in text or "de" in text
 

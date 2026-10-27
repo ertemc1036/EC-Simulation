@@ -60,12 +60,17 @@ _ARCHETYPES: list[dict[str, str]] = [
 ]
 
 # Role → persona framing when the scenario names stakeholders explicitly.
+# ``conflict`` is a hard stance that clashes with other roles (Phase 3.5).
 _ROLE_PERSONAS: dict[str, dict[str, str]] = {
     "bürger": {
         "name": "Bürgerstimme",
         "slug": "buerger",
         "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
         "goal": "Alltagsfolgen und Gerechtigkeit für Anwohnende sichtbar machen.",
+        "conflict": (
+            "Fordere soziale Abfederung und Ausnahmen für mobilitätseingeschränkte "
+            "Menschen; widersprich Wirtschaftsargumenten ohne Alltagsbezug."
+        ),
         "style": "direkt, erfahrungsbezogen, pragmatisch",
     },
     "buerger": {
@@ -73,6 +78,10 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "buerger",
         "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
         "goal": "Alltagsfolgen und Gerechtigkeit für Anwohnende sichtbar machen.",
+        "conflict": (
+            "Fordere soziale Abfederung und Ausnahmen für mobilitätseingeschränkte "
+            "Menschen; widersprich Wirtschaftsargumenten ohne Alltagsbezug."
+        ),
         "style": "direkt, erfahrungsbezogen, pragmatisch",
     },
     "unternehmen": {
@@ -80,6 +89,10 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "unternehmen",
         "description": "Vertritt Betriebe, Lieferketten und wirtschaftliche Planungssicherheit.",
         "goal": "Wirtschaftliche Risiken und praktikable Übergänge benennen.",
+        "conflict": (
+            "Fordere Lieferfenster, Ausnahmen und Übergangsfristen; "
+            "widersprich pauschalen Verboten ohne Logistikkonzept."
+        ),
         "style": "kostenbewusst, lösungsorientiert, nüchtern",
     },
     "politiker": {
@@ -87,6 +100,11 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "politiker",
         "description": "Wägt Mehrheiten, Recht und Umsetzbarkeit ab.",
         "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "zwischen Bürgerwünschen und Betriebs-/Kostengrenzen, ohne eine Seite "
+            "komplett zu übernehmen."
+        ),
         "style": "abwägend, öffentlichkeitsorientiert, strategisch",
     },
     "verkehrsbetriebe": {
@@ -94,6 +112,10 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "verkehrsbetriebe",
         "description": "Fokussiert Kapazität, Takt und Betrieb öffentlicher Verkehrsmittel.",
         "goal": "Betriebsfähigkeit und Ausbau des ÖPNV konkretisieren.",
+        "conflict": (
+            "Fordere Finanzierung und Kapazitätsausbau vor dem Stichtag; "
+            "widersprich Terminen ohne belastbaren Betriebs- und Personalplan."
+        ),
         "style": "betriebsnah, zahlenorientiert, dienstleistungsbezogen",
     },
     "anwohnende": {
@@ -101,6 +123,10 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "anwohnende",
         "description": "Betont Lärm, Sicherheit und Alltag vor der Haustür.",
         "goal": "Lokale Auswirkungen und Mitspracherechte stärken.",
+        "conflict": (
+            "Priorisiere Lärm-/Sicherheitsgewinne vor Durchgangsverkehr; "
+            "widersprich Lieferinteressen, die den Wohnraum belasten."
+        ),
         "style": "nahbar, kritisch, lokal",
     },
     "handel": {
@@ -108,6 +134,10 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         "slug": "handel",
         "description": "Vertritt Ladenlokale, Kundenfrequenz und Anlieferung.",
         "goal": "Erreichbarkeit und Umsätze im Blick behalten.",
+        "conflict": (
+            "Fordere kunden- und lieferfreundliche Zugänge; "
+            "widersprich Regeln, die Frequenz und Anlieferung unzumutbar treffen."
+        ),
         "style": "praktisch, kundenbezogen",
     },
 }
@@ -311,18 +341,40 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
     return roles[:limit]
 
 
-def extract_scenario_keywords(scenario: str, *, limit: int = 4) -> list[str]:
-    """Pull distinctive tokens from the scenario for persona binding."""
-    roles = extract_stakeholder_roles(scenario, limit=limit)
-    if roles:
-        return roles[:limit]
-
+def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
+    """Topic nouns from the scenario — excludes named stakeholder roles."""
+    role_norms = {
+        r.lower()
+        .replace("ü", "ue")
+        .replace("ö", "oe")
+        .replace("ä", "ae")
+        .replace("ß", "ss")
+        for r in extract_stakeholder_roles(scenario, limit=8)
+    }
+    # Also drop singular/display forms used in role lists.
+    role_norms.update(
+        {
+            "buerger",
+            "burger",
+            "unternehmen",
+            "politiker",
+            "verkehrsbetriebe",
+            "anwohnende",
+            "handel",
+        }
+    )
     tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9-]{3,}", scenario or "")
     scored: list[tuple[int, int, str]] = []
     seen: set[str] = set()
     for idx, t in enumerate(tokens):
         low = t.lower()
-        if low in _STOP or low in seen:
+        norm = (
+            low.replace("ü", "ue")
+            .replace("ö", "oe")
+            .replace("ä", "ae")
+            .replace("ß", "ss")
+        )
+        if low in _STOP or low in seen or norm in role_norms:
             continue
         seen.add(low)
         score = 0
@@ -345,6 +397,21 @@ def extract_scenario_keywords(scenario: str, *, limit: int = 4) -> list[str]:
             if len(out) >= limit:
                 break
     return out or ["Diskussion"]
+
+
+def extract_scenario_keywords(scenario: str, *, limit: int = 4) -> list[str]:
+    """Pull distinctive tokens from the scenario for persona binding.
+
+    Prefers content nouns (Berlin, Autos, …). Falls back to stakeholder role
+    names only when the scenario has no usable content keywords.
+    """
+    content = extract_content_keywords(scenario, limit=limit)
+    if content and content != ["Diskussion"]:
+        return content[:limit]
+    roles = extract_stakeholder_roles(scenario, limit=limit)
+    if roles:
+        return roles[:limit]
+    return content
 
 
 def _slugify(text: str) -> str:
@@ -390,8 +457,28 @@ def _persona_for_role(role: str, arch_fallback: dict[str, str]) -> dict[str, str
             f"{arch_fallback['description']}"
         ),
         "goal": f"Interessen von {role} im Szenario klar vertreten. {arch_fallback['goal']}",
+        "conflict": (
+            f"Vertrete konsequent «{role}» gegen konkurrierende Stakeholder-Interessen; "
+            f"keine ausgewogene Gesamtschau aller Seiten."
+        ),
         "style": arch_fallback["style"],
     }
+
+
+def _archetype_conflict(arch: dict[str, str]) -> str:
+    """Opposing stance for filler archetypes when roles do not fill the roster."""
+    slug = arch.get("slug") or ""
+    mapping = {
+        "analyst": "Stelle Behauptungen anderer Agenten infrage; verlange Belege statt Konsens.",
+        "builder": "Dränge auf Pilotversuche und messbare Schritte; blockiere reine Prinzipiendebatten.",
+        "moderator": "Zwinge gegensätzliche Positionen zur Klarheit; verhindere Scheinkonsens.",
+        "contrarian": "Spitze Gegenpositionen zu; greife Mehrheitsannahmen direkt an.",
+        "empath": "Stelle Betroffene und soziale Kosten über Effizienzargumente.",
+    }
+    return mapping.get(
+        slug,
+        "Halte eine klare Gegenposition zu anderen Stimmen; keine Allparteien-Zusammenfassung.",
+    )
 
 
 def generate_dynamic_agents(
@@ -423,7 +510,8 @@ def generate_dynamic_agents(
                 f"{persona['description']} Bezieht Positionen explizit auf «{topic}» "
                 f"im Szenario: {short}."
             )
-            goal = f"{persona['goal']} Fokus: {topic}."
+            conflict = persona.get("conflict") or _archetype_conflict(arch)
+            goal = f"{persona['goal']} Zielkonflikt: {conflict} Thema: {topic}."
             style = persona["style"]
         else:
             first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
@@ -436,7 +524,10 @@ def generate_dynamic_agents(
                 f"{arch['description']} Bezieht Positionen explizit auf «{topic}» "
                 f"im Szenario: {short}."
             )
-            goal = f"{arch['goal']} Fokus: {topic}."
+            goal = (
+                f"{arch['goal']} Zielkonflikt: {_archetype_conflict(arch)} "
+                f"Thema: {topic}."
+            )
             style = arch["style"]
 
         if user_name in used_user_names:

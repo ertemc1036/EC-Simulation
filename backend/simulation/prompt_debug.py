@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # Stable id for the EC custom prompt bundle (system + decision templates).
-PROMPT_BUNDLE_ID = "ec-custom-forum-de-v1"
+PROMPT_BUNDLE_ID = "ec-custom-forum-de-v2"
 
 # Markers that prove OASIS stock Reddit/Twitter framing reached the client.
 OASIS_REDDIT_OBJECTIVE = "You're a Reddit user"
@@ -25,6 +25,8 @@ OASIS_LIKE_BAIT = "don't limit your actions for example to just like"
 CUSTOM_ZIEL_MARKER = "# ZIEL / OBJECTIVE"
 CUSTOM_DECISION_MARKER = "Entscheide jetzt"
 CUSTOM_NO_TWEET_META = "Tweet-/Like-Spam"
+CUSTOM_FEED_MARKER = "FEED-KONTEXT"
+CUSTOM_MEMORY_MARKER = "MEMORY-KONTEXT"
 
 _SECRET_KEY_RE = re.compile(
     r"(?i)(api[_-]?key|authorization|bearer\s+[a-z0-9\-._~+/]+=*|sk-[a-z0-9]{10,})"
@@ -99,9 +101,12 @@ def analyze_messages(
     markers = {
         "custom_ziel": CUSTOM_ZIEL_MARKER in blob,
         "custom_decision": CUSTOM_DECISION_MARKER in blob,
+        "custom_feed_context": CUSTOM_FEED_MARKER in blob,
+        "custom_memory_context": CUSTOM_MEMORY_MARKER in blob,
         "custom_anti_tweet_meta": CUSTOM_NO_TWEET_META in blob
         or "Like-Ketten" in blob
-        or "Likes-zum-Liken" in blob,
+        or "Likes-zum-Liken" in blob
+        or "Tweet-/Like-Spam-Meta-Posts" in blob,
         "deutsch_instruction": "auf Deutsch" in blob or "Sprache für alle Inhalte: Deutsch" in blob,
         "oasis_reddit_objective": OASIS_REDDIT_OBJECTIVE in blob,
         "oasis_twitter_objective": OASIS_TWITTER_OBJECTIVE in blob,
