@@ -34,8 +34,11 @@ from backend.config import (
     Settings,
     settings as default_settings,
 )
+from backend.simulation.agent_generator import generate_agents
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
+from backend.simulation.knowledge_graph import LocalKnowledgeGraph
+from backend.simulation.local_memory import LocalAgentMemory
 from backend.simulation.manual_script import build_manual_rounds
 from backend.simulation.prompt_debug import (
     PROMPT_BUNDLE_ID,
@@ -52,6 +55,21 @@ from backend.simulation.prompts import (
 )
 from backend.simulation.tracked_model import TrackedModelBackend
 from backend.zep.client import ZepMemoryStub
+
+# Explicit OASIS Reddit interaction set for Phase-3 LLMAction runs.
+# Reply = CREATE_COMMENT on an observed post (no separate reply ActionType).
+LLM_INTERACTION_ACTIONS = [
+    ActionType.CREATE_POST,
+    ActionType.CREATE_COMMENT,
+    ActionType.LIKE_POST,
+    ActionType.DISLIKE_POST,
+    ActionType.LIKE_COMMENT,
+    ActionType.DISLIKE_COMMENT,
+    ActionType.SEARCH_POSTS,
+    ActionType.REFRESH,
+    ActionType.DO_NOTHING,
+    ActionType.FOLLOW,
+]
 
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -75,6 +93,8 @@ class SimulationState:
     language: str = "de"
     step: int = 0
     max_steps: int = 4
+    agent_count: int = 5
+    agent_generation: str = "dynamic"
     llm_configured: bool = False
     message: str = ""
     stop_reason: str | None = None
@@ -86,6 +106,8 @@ class SimulationState:
     decision_log: list[dict] = field(default_factory=list)
     model_calls: list[dict] = field(default_factory=list)
     cost_summary: dict[str, Any] = field(default_factory=dict)
+    agent_memory: dict[str, Any] = field(default_factory=dict)
+    knowledge_graph: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     result_path: str | None = None
     db_path: str | None = None
@@ -101,6 +123,8 @@ class SimulationState:
             "language": self.language,
             "step": self.step,
             "max_steps": self.max_steps,
+            "agent_count": self.agent_count,
+            "agent_generation": self.agent_generation,
             "llm_configured": self.llm_configured,
             "message": self.message,
             "stop_reason": self.stop_reason,
@@ -112,6 +136,8 @@ class SimulationState:
             "decision_log": self.decision_log,
             "model_calls": self.model_calls,
             "cost_summary": self.cost_summary,
+            "agent_memory": self.agent_memory,
+            "knowledge_graph": self.knowledge_graph,
             "error": self.error,
             "result_path": self.result_path,
             "db_path": self.db_path,
@@ -140,11 +166,19 @@ class SimulationEngine:
         self._model_factory = model_factory
         self._tracker: CostTracker | None = None
         self._prompt_debug: PromptDebugBuffer = PromptDebugBuffer()
+        self._run_agents: list[AgentProfile] = list(
+            DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]
+        )
         self._agent_profiles: dict[int, AgentProfile] = {
-            p.agent_id: p for p in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]
+            p.agent_id: p for p in self._run_agents
         }
+        self._local_memory = LocalAgentMemory(
+            max_entries_per_agent=self.cfg.agent_local_memory_entries
+        )
+        self._knowledge_graph = LocalKnowledgeGraph()
         self._run_language: str = "de"
         self._run_scenario: str = ""
+        self._agent_generation: str = "dynamic"
         self._limit_stop: bool = False
         self._failed: bool = False
         self._custom_prompts_verified: bool = False
@@ -198,6 +232,8 @@ class SimulationEngine:
         max_steps: int | None = None,
         llm_run_approved: bool = False,
         language: str | None = None,
+        agent_count: int | None = None,
+        agent_generation: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             if self._is_busy():
@@ -222,6 +258,47 @@ class SimulationEngine:
                 language if language is not None else self.cfg.simulation_language
             )
 
+            gen_mode = (
+                agent_generation
+                if agent_generation is not None
+                else self.cfg.default_agent_generation
+            ).strip().lower() or "dynamic"
+            if gen_mode in {"fixed", "test", "default"}:
+                gen_mode = "fixed_test"
+            if gen_mode not in {"dynamic", "fixed_test"}:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Unbekannte agent_generation '{agent_generation}'. "
+                        "Erlaubt: dynamic | fixed_test."
+                    ),
+                    "state": self.state.to_dict(),
+                }
+
+            raw_count = (
+                agent_count
+                if agent_count is not None
+                else self.cfg.default_agent_count
+            )
+            try:
+                n_agents = int(raw_count)
+            except (TypeError, ValueError):
+                return {
+                    "ok": False,
+                    "error": "agent_count muss eine Zahl sein.",
+                    "state": self.state.to_dict(),
+                }
+            n_agents = max(1, min(n_agents, self.cfg.max_agents, LIVE_TEST_MAX_AGENTS))
+            # fixed_test always uses the classic 5-roster truncated to n_agents;
+            # dashboard "Testmodus" typically requests count=5.
+            run_agents = generate_agents(
+                scenario.strip(),
+                n_agents,
+                mode=gen_mode,
+                max_agents=LIVE_TEST_MAX_AGENTS,
+            )
+            agent_dicts = [a.to_dict() for a in run_agents]
+
             # Approval is enforced before key/availability checks so the gate
             # cannot be bypassed by frontend-only confirmation.
             if requested == "llm" and not llm_run_approved:
@@ -236,9 +313,11 @@ class SimulationEngine:
                     mode="llm",
                     scenario=scenario,
                     language=sim_lang,
+                    agent_count=len(run_agents),
+                    agent_generation=gen_mode,
                     llm_configured=self.cfg.llm_configured,
                     message=msg,
-                    agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
+                    agents=agent_dicts,
                     cost_summary={},
                 )
                 blocked = self.state.to_dict()
@@ -254,10 +333,12 @@ class SimulationEngine:
                     mode="llm",
                     scenario=scenario,
                     language=sim_lang,
+                    agent_count=len(run_agents),
+                    agent_generation=gen_mode,
                     llm_configured=self.cfg.llm_configured,
                     message=self.cfg.status_payload()["llm_mode_blocked_reason"]
                     or "LLM-Modus nicht verfügbar.",
-                    agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
+                    agents=agent_dicts,
                     cost_summary={},
                 )
                 blocked = self.state.to_dict()
@@ -277,15 +358,13 @@ class SimulationEngine:
             self.cfg.results_dir.mkdir(parents=True, exist_ok=True)
             db_path = self.cfg.results_dir / f"{run_id}.db"
 
-            calls_per_round = model_calls_required_per_round(
-                min(len(DEFAULT_AGENTS), LIVE_TEST_MAX_AGENTS)
-            )
+            calls_per_round = model_calls_required_per_round(len(run_agents))
             if effective == "llm":
                 if self._model_factory is not None:
                     message = (
                         "LLM-Modus (Test-Injection): echte OASIS LLMAction, "
                         "kein kostenpflichtiger Provider-Call. Freigabe bestätigt. "
-                        f"Sprache={sim_lang}."
+                        f"Sprache={sim_lang}. Agenten={len(run_agents)} ({gen_mode})."
                     )
                 else:
                     est = self.cfg.estimate_max_run_cost_usd(rounds=steps)
@@ -293,7 +372,7 @@ class SimulationEngine:
                         "LLM-Modus: echte OASIS LLMAction über OpenAI-kompatibles Modell. "
                         f"Freigabe bestätigt. Sprache={sim_lang} "
                         f"({language_display_name(sim_lang)}). "
-                        f"Limits: "
+                        f"Agenten={len(run_agents)} ({gen_mode}). Limits: "
                         f"{min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS)} Calls / "
                         f"{self.cfg.max_tokens_per_run} Tokens / "
                         f"${self.cfg.max_cost_usd_per_run:.2f} / "
@@ -306,7 +385,7 @@ class SimulationEngine:
                 message = (
                     "ManualAction-Modus: echte OASIS-Umgebung mit StubModel — "
                     "keine LLM-API-Calls. "
-                    f"Sprache={sim_lang}. "
+                    f"Sprache={sim_lang}. Agenten={len(run_agents)} ({gen_mode}). "
                     + (
                         "OPENAI_API_KEY fehlt."
                         if not self.cfg.llm_configured
@@ -316,11 +395,18 @@ class SimulationEngine:
 
             self._tracker = self._new_tracker()
             self._prompt_debug = PromptDebugBuffer()
+            self._local_memory = LocalAgentMemory(
+                max_entries_per_agent=self.cfg.agent_local_memory_entries
+            )
+            self._knowledge_graph = LocalKnowledgeGraph()
             self._limit_stop = False
             self._failed = False
             self._custom_prompts_verified = False
             self._run_language = sim_lang
             self._run_scenario = scenario.strip()
+            self._agent_generation = gen_mode
+            self._run_agents = run_agents
+            self._agent_profiles = {p.agent_id: p for p in run_agents}
             self.state = SimulationState(
                 run_id=run_id,
                 status="running",
@@ -328,9 +414,13 @@ class SimulationEngine:
                 scenario=scenario.strip(),
                 language=sim_lang,
                 max_steps=steps,
+                agent_count=len(run_agents),
+                agent_generation=gen_mode,
                 llm_configured=self.cfg.llm_configured,
                 message=message,
-                agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
+                agents=agent_dicts,
+                agent_memory=self._local_memory.snapshot(),
+                knowledge_graph=self._knowledge_graph.to_dict(),
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -382,7 +472,13 @@ class SimulationEngine:
         )
 
         self.zep.maybe_remember_session(
-            self.state.run_id, scenario=scenario, mode=mode, agents=DEFAULT_AGENTS
+            self.state.run_id,
+            scenario=scenario,
+            mode=mode,
+            agents=self._run_agents,
+        )
+        self.zep.prepare_local_memory_handoff(
+            self.state.run_id, self._local_memory.snapshot()
         )
 
         await env.reset()
@@ -544,6 +640,13 @@ class SimulationEngine:
                             "ts": _utc_now(),
                         }
                     )
+                    engine._local_memory.ingest_action(
+                        agent_id=profile.agent_id,
+                        action_type=str(action_name or "unknown"),
+                        action_args=args,
+                        step=engine.state.step + 1,
+                        goal=profile.goal,
+                    )
                 evidence = engine._prompt_debug.last_for_agent(profile.agent_id)
                 engine._append_decision_log(
                     {
@@ -581,8 +684,13 @@ class SimulationEngine:
         self, mode: str, *, scenario: str, language: str
     ) -> AgentGraph:
         graph = AgentGraph()
-        available = ActionType.get_default_reddit_actions()
-        for profile in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]:
+        # Prefer explicit interaction set for LLM; full Reddit defaults for manual.
+        available = (
+            list(LLM_INTERACTION_ACTIONS)
+            if mode == "llm"
+            else ActionType.get_default_reddit_actions()
+        )
+        for profile in self._run_agents:
             inner = self._build_inner_model(mode, profile.agent_id)
             model = (
                 self._wrap_model(inner, profile.agent_id, mode)
@@ -634,26 +742,36 @@ class SimulationEngine:
     async def _run_manual(
         self, env, scenario: str, max_steps: int, db_path: Path
     ) -> None:
-        rounds = build_manual_rounds(scenario, max_steps=max_steps)
+        rounds = build_manual_rounds(
+            scenario, agents=self._run_agents, max_steps=max_steps
+        )
         for idx, round_map in enumerate(rounds):
             actions: dict[SocialAgent, list[ManualAction]] = {}
             for agent_id, acts in round_map.items():
+                if agent_id not in self._agent_profiles:
+                    continue
                 agent = env.agent_graph.get_agent(agent_id)
                 actions[agent] = acts
                 profile = self._agent_profiles.get(agent_id)
                 for act in acts:
-                    self._append_action_log(
-                        {
-                            "step": idx + 1,
-                            "agent_id": agent_id,
-                            "action_type": act.action_type.value,
-                            "action_args": act.action_args,
-                            "source": "ManualAction",
-                            "kind": "simulated_platform_action",
-                            "goal": profile.goal if profile else None,
-                            "language": self._run_language,
-                            "ts": _utc_now(),
-                        }
+                    entry = {
+                        "step": idx + 1,
+                        "agent_id": agent_id,
+                        "action_type": act.action_type.value,
+                        "action_args": act.action_args,
+                        "source": "ManualAction",
+                        "kind": "simulated_platform_action",
+                        "goal": profile.goal if profile else None,
+                        "language": self._run_language,
+                        "ts": _utc_now(),
+                    }
+                    self._append_action_log(entry)
+                    self._local_memory.ingest_action(
+                        agent_id=agent_id,
+                        action_type=act.action_type.value,
+                        action_args=act.action_args,
+                        step=idx + 1,
+                        goal=profile.goal if profile else None,
                     )
             await env.step(actions)
             with self._lock:
@@ -665,10 +783,11 @@ class SimulationEngine:
         self, env, scenario: str, max_steps: int, db_path: Path, language: str
     ) -> None:
         # Seed so agents have content to perceive (ManualAction, not billed).
-        seed_agent = env.agent_graph.get_agent(0)
+        seed_profile = self._run_agents[0]
+        seed_agent = env.agent_graph.get_agent(seed_profile.agent_id)
         seed_content = (
-            f"[Seed / {DEFAULT_AGENTS[0].name}] Diskussionsimpuls ({language}): "
-            f"{scenario[:500]} — Ziel: {DEFAULT_AGENTS[0].goal}"
+            f"[Seed / {seed_profile.name}] Diskussionsimpuls ({language}): "
+            f"{scenario[:500]} — Ziel: {seed_profile.goal}"
         )
         seed = ManualAction(
             action_type=ActionType.CREATE_POST,
@@ -677,16 +796,23 @@ class SimulationEngine:
         self._append_action_log(
             {
                 "step": 0,
-                "agent_id": 0,
+                "agent_id": seed_profile.agent_id,
                 "action_type": "create_post",
                 "action_args": seed.action_args,
                 "source": "ManualAction",
                 "kind": "simulated_platform_action",
                 "note": "seed_before_llm",
-                "goal": DEFAULT_AGENTS[0].goal,
+                "goal": seed_profile.goal,
                 "language": language,
                 "ts": _utc_now(),
             }
+        )
+        self._local_memory.ingest_action(
+            agent_id=seed_profile.agent_id,
+            action_type="create_post",
+            action_args=seed.action_args,
+            step=0,
+            goal=seed_profile.goal,
         )
         await env.step({seed_agent: seed})
         self._refresh_from_db(db_path)
@@ -708,7 +834,7 @@ class SimulationEngine:
             # and live-test agent ceiling (5 × 2 ≤ 10 calls).
             agents = [
                 a for _, a in env.agent_graph.get_agents()
-            ][: min(remaining, LIVE_TEST_MAX_AGENTS)]
+            ][: min(remaining, len(self._run_agents), LIVE_TEST_MAX_AGENTS)]
             actions = {agent: LLMAction() for agent in agents}
             for agent in agents:
                 profile = self._agent_profiles.get(agent.social_agent_id)
@@ -880,6 +1006,13 @@ class SimulationEngine:
                     }
                     self.state.action_log.append(entry)
                     known.add(key)
+                    self._local_memory.ingest_action(
+                        agent_id=int(t.get("user_id") or -1),
+                        action_type=str(action),
+                        action_args=info,
+                        step=step,
+                        goal=profile.goal if profile else None,
+                    )
             elif traces and not self.state.action_log:
                 # Fallback only for unexpected empty logs — skip signup/noise.
                 self.state.action_log = [
@@ -896,12 +1029,33 @@ class SimulationEngine:
                     if t.get("action")
                     not in {"sign_up", "refresh", "search_posts"}
                 ]
+            self._sync_memory_and_graph_locked(step=step)
+
+    def _sync_memory_and_graph_locked(self, *, step: int | None = None) -> None:
+        """Caller must hold ``self._lock`` (or accept best-effort race on idle)."""
+        agent_ids = [p.agent_id for p in self._run_agents]
+        self._local_memory.ingest_feed_snapshot(
+            agent_ids=agent_ids,
+            posts=self.state.posts,
+            comments=self.state.comments,
+            step=step if step is not None else self.state.step,
+        )
+        self._knowledge_graph.rebuild(
+            scenario=self._run_scenario or self.state.scenario,
+            agents=self._run_agents,
+            posts=self.state.posts,
+            comments=self.state.comments,
+            reactions=self.state.reactions,
+            action_log=self.state.action_log,
+        )
+        self.state.agent_memory = self._local_memory.snapshot()
+        self.state.knowledge_graph = self._knowledge_graph.to_dict()
 
     def _persist_results(self, db_path: Path) -> Path:
         self._refresh_from_db(db_path)
         self._sync_cost_to_state()
         out = self.cfg.results_dir / f"{self.state.run_id}.json"
-        agents_n = min(len(DEFAULT_AGENTS), LIVE_TEST_MAX_AGENTS)
+        agents_n = len(self._run_agents) or LIVE_TEST_MAX_AGENTS
         prompt_summary = self._prompt_debug.summary()
         # Prefer live message captures; fall back to graph-install verification.
         custom_active = bool(
@@ -924,7 +1078,13 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
+                "phase": 3,
+                "agent_count": agents_n,
+                "agent_generation": self._agent_generation,
                 "agent_memory_window": self.cfg.agent_memory_window,
+                "agent_local_memory_entries": self.cfg.agent_local_memory_entries,
+                "zep_integrated": False,
+                "knowledge_graph_backend": "local",
                 "model_calls_per_round_required": model_calls_required_per_round(
                     agents_n
                 ),
@@ -942,8 +1102,13 @@ class SimulationEngine:
             "decision_log": self.state.decision_log,
             "model_calls": self.state.model_calls,
             "cost_summary": self.state.cost_summary,
+            "agent_memory": self.state.agent_memory,
+            "knowledge_graph": self.state.knowledge_graph,
             "db_path": str(db_path),
         }
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self.zep.maybe_store_summary(self.state.run_id, payload)
+        self.zep.prepare_local_memory_handoff(
+            self.state.run_id, payload.get("agent_memory") or {}
+        )
         return out

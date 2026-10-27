@@ -33,7 +33,7 @@ _POST_ID_RE = re.compile(r'"post_id"\s*:\s*(\d+)')
 
 
 class ScriptedReactiveModel(BaseModelBackend):
-    """Observes prompt content and emits create_post / create_comment / like_post."""
+    """Observes prompt content; emits real OASIS tools: post/comment/like/dislike."""
 
     def __init__(self, *, agent_id: int = 0, label: str = "scripted") -> None:
         super().__init__(model_type=ModelType.GPT_4O_MINI, model_config_dict={})
@@ -60,7 +60,8 @@ class ScriptedReactiveModel(BaseModelBackend):
         ids = [int(x) for x in _POST_ID_RE.findall(blob)]
         self.call_count += 1
         n = self.call_count
-        # Rotate actions so multi-agent runs produce varied interactions.
+        # Rotate actions so multi-agent runs produce varied real platform interactions.
+        # Reply = create_comment on an observed post (OASIS has no separate reply type).
         if not ids:
             return (
                 "create_post",
@@ -71,20 +72,23 @@ class ScriptedReactiveModel(BaseModelBackend):
                     )
                 },
             )
-        target = ids[min(self.agent_id, len(ids) - 1)]
-        kind = n % 3
-        if kind == 1:
+        target = ids[min(self.agent_id % len(ids), len(ids) - 1)]
+        kind = (n + self.agent_id) % 4
+        if kind == 0:
             return (
                 "create_comment",
                 {
                     "post_id": target,
                     "content": (
-                        f"[{self.label}:{self.agent_id}] Reaktion #{n} auf Post {target}."
+                        f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                        f"auf Post {target}."
                     ),
                 },
             )
-        if kind == 2:
+        if kind == 1:
             return ("like_post", {"post_id": target})
+        if kind == 2:
+            return ("dislike_post", {"post_id": target})
         return (
             "create_post",
             {

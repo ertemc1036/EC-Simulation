@@ -1,8 +1,8 @@
-# EC-Simulation (Phase 2.5)
+# EC-Simulation (Phase 3)
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
 
-Phase 1: echte `ManualAction`-Läufe. Phase 2: echte OASIS `LLMAction` mit OpenAI-kompatiblem Modell, Zielen, begrenztem Erinnerungskontext, Kostenlimits und getrennter Protokollierung von Modellaufrufen vs. Platform-Aktionen. Phase 2.5: konfigurierbare Simulationssprache (Default Deutsch), Szenario/Ziel-Kontext je Entscheidung, Endzustände `completed | limit_reached | failed`.
+Phase 1: echte `ManualAction`-Läufe. Phase 2.x: echte OASIS `LLMAction`, Sprache, Freigabe, Limits. **Phase 3:** dynamische Agentengenerierung aus dem Szenario (einstellbare Anzahl, `fixed_test` = feste 5), echte Interaktionen (Post/Kommentar-Reply/Like/Dislike), lokales begrenztes Agentengedächtnis (Zep nur vorbereitet), lokaler Wissensgraph + Dashboard.
 
 ## Voraussetzungen
 
@@ -54,6 +54,15 @@ npm run dev
 # → http://127.0.0.1:5173
 ```
 
+## Phase 3 — Dynamische Agenten
+
+| Modus | Bedeutung |
+|-------|-----------|
+| `dynamic` | Einzigartige Personas aus Szenario-Keywords (keine Klone) |
+| `fixed_test` | Klassisches Alice…Eve-Roster (Testmodus, max. 5) |
+
+Anzahl: 1–5 (Live-Test-Ceiling aus Phase 2.x). Start-Body: `agent_count`, `agent_generation`.
+
 ## ManualAction vs LLMAction
 
 | Modus | Engine | Modell | Kosten |
@@ -62,11 +71,17 @@ npm run dev
 | `llm` | echte `OasisEnv` + `LLMAction` | OpenAI-kompatibel (`OPENAI_*`) | Calls/Tokens limitiert |
 | `auto` | wird wie `manual` behandelt (kein stilles LLM) | — | — |
 
-Dashboard kennzeichnet Quellen im Aktionsprotokoll und führt **Modellaufrufe/Kosten** getrennt.
+LLM-Interaktionen (keine Fake-Entscheidungen): Agenten lesen den Feed und wählen echte OASIS-Tools — `create_post`, `create_comment` (Reply), `like_post`, `dislike_post`, …
 
-**Modellaufrufe pro Runde:** 1 Call pro Agent (`LLMAction` → `perform_action_by_llm` → `astep`). Bei 5 Agenten × 2 Runden = 10 Calls (Live-Test-Ceiling). Seed-`ManualAction` kostet 0 Calls.
+**Modellaufrufe pro Runde:** 1 Call pro Agent. Bei 5 Agenten × 2 Runden = 10 Calls (Ceiling). Seed-`ManualAction` kostet 0 Calls.
 
-**Endzustände:** `completed` (alle Runden), `limit_reached` (Call/Token/Kosten-Limit), `failed` (Fehler). Zusätzlich Lifecycle: `idle` / `running` / `blocked`.
+**Endzustände:** `completed` | `limit_reached` | `failed` (+ Lifecycle `idle` / `running` / `blocked`).
+
+## Memory & Wissensgraph
+
+- **Lokal:** `LocalAgentMemory` (Ringpuffer je Agent) + CAMEL `ChatHistoryMemory(window_size=AGENT_MEMORY_WINDOW)`
+- **Zep:** Stub unter `backend/zep/` — **nicht integriert**; Handoff-Form vorbereitet
+- **Graph:** lokale Knoten (Akteure / Themen / Aussagen) + Kanten (posted, commented, replies_to, liked, …) im Dashboard
 
 ## Verhalten ohne API-Key
 
@@ -78,9 +93,9 @@ Dashboard kennzeichnet Quellen im Aktionsprotokoll und führt **Modellaufrufe/Ko
 ## API (Kurz)
 
 - `GET /api/health` — OASIS-Import, Versionen, LLM/Zep-Status (ohne Secrets)
-- `GET /api/agents` — fünf Agentenprofile inkl. Ziele
-- `POST /api/simulation/start` — `{ "scenario", "mode": "manual|llm", "max_steps", "language?", "llm_run_approved?" }`
-- `GET /api/simulation` — Live-State inkl. `action_log`, `decision_log`, `model_calls`, `cost_summary`, `stop_reason`
+- `GET /api/agents?scenario=&count=&generation=dynamic|fixed_test` — Profil-Preview
+- `POST /api/simulation/start` — `{ scenario, mode, max_steps, language?, agent_count?, agent_generation?, llm_run_approved? }`
+- `GET /api/simulation` — Live-State inkl. Feed, Memory, Knowledge-Graph, Kosten
 - `GET /api/results` — JSON-Läufe unter `data/results/`
 - Socket.IO Event `simulation_update`
 
@@ -92,28 +107,23 @@ source .venv/bin/activate
 pytest -q
 ```
 
-LLM-Pfad-Tests nutzen eine injizierte `ScriptedReactiveModel` (echte `LLMAction`, **keine** Provider-Calls). Echter OpenAI-Lauf braucht Key + explizite Freigabe.
+LLM-Pfad-Tests nutzen `ScriptedReactiveModel` (echte `LLMAction`, **keine** Provider-Calls).
 
 ## Kosten-/Sicherheitslimits (`.env`)
 
-Erste LLMAction-Readiness-Defaults (5 Agenten × 2 Runden):
+Phase-2.x-Ceilings bleiben:
 
-- `OPENAI_MODEL` (Default `gpt-4.1-mini`, OpenAI-kompatibel via CAMEL)
 - `MAX_SIMULATION_STEPS` (Default 2)
 - `MAX_LLM_CALLS_PER_RUN` (Default 10)
-- `MAX_TOKENS_PER_CALL` (Default 500)
-- `MAX_TOKENS_PER_RUN` (Default 20000)
-- `MAX_COST_USD_PER_RUN` (Default 0.20 — hartes Limit vor dem nächsten Call)
-- `LLM_MAX_RETRIES` (Default 0 — keine automatischen Provider-Retries)
-- `AGENT_MEMORY_WINDOW` (Default 6)
-- `LLM_PRICE_INPUT_PER_1M` / `LLM_PRICE_OUTPUT_PER_1M` (Dashboard + Kostenschätzung)
-- `REQUEST_TIMEOUT_SECONDS`
-- `ALLOW_LLM_MODE`
-- `SIMULATION_LANGUAGE` (Default `de`)
+- `MAX_TOKENS_PER_CALL` / `MAX_TOKENS_PER_RUN` / `MAX_COST_USD_PER_RUN`
+- `LLM_MAX_RETRIES` (Default 0)
+- `AGENT_MEMORY_WINDOW` / `AGENT_LOCAL_MEMORY_ENTRIES`
+- `DEFAULT_AGENT_COUNT` / `AGENT_GENERATION_MODE`
+- `ALLOW_LLM_MODE` / `SIMULATION_LANGUAGE`
+- Freigabe: `llm_run_approved=true` für LLM-Starts
 
-Parallel: nur eine Simulation gleichzeitig (`status=running` → Start blockiert).
-Pro Lauf frische SQLite-DB (`{run_id}.db`) + `OASIS_DB_PATH` — kein DB-Reuse zwischen Läufen.
+Parallel: nur eine Simulation gleichzeitig. Pro Lauf frische SQLite-DB — kein DB-Reuse.
 
 ## Zep
 
-Stub unter `backend/zep/` — keine Pflicht-Calls. Aktivierung später via `ZEP_ENABLED=true` + `ZEP_API_KEY`.
+Stub unter `backend/zep/` — **kein „Zep integriert“-Claim**. Aktivierung später via `ZEP_ENABLED=true` + `ZEP_API_KEY` + SDK-Wiring.

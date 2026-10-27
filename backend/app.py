@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.config import settings  # noqa: E402
+from backend.config import LIVE_TEST_MAX_AGENTS, settings  # noqa: E402
+from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
 
@@ -69,7 +70,51 @@ def health():
 
 @app.get("/api/agents")
 def agents():
-    return jsonify({"agents": profiles_payload()})
+    """Preview profiles. Query: scenario, count, generation=dynamic|fixed_test."""
+    scenario = (request.args.get("scenario") or "").strip()
+    generation = (request.args.get("generation") or "fixed_test").strip().lower()
+    raw_count = request.args.get("count")
+    try:
+        count = int(raw_count) if raw_count is not None else LIVE_TEST_MAX_AGENTS
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "count muss eine Zahl sein"}), 400
+    count = max(1, min(count, LIVE_TEST_MAX_AGENTS))
+    if generation in {"fixed", "test", "default"}:
+        generation = "fixed_test"
+    if not scenario and generation == "dynamic":
+        # Without a scenario, fall back to the classic roster preview.
+        return jsonify(
+            {
+                "agents": profiles_payload()[:count],
+                "agent_count": count,
+                "agent_generation": "fixed_test",
+                "note": "Kein Szenario — fixed_test Preview.",
+            }
+        )
+    if generation == "dynamic" and scenario:
+        profiles = generate_agents(
+            scenario, count, mode="dynamic", max_agents=LIVE_TEST_MAX_AGENTS
+        )
+        return jsonify(
+            {
+                "agents": [p.to_dict() for p in profiles],
+                "agent_count": len(profiles),
+                "agent_generation": "dynamic",
+            }
+        )
+    profiles = generate_agents(
+        scenario or "Test",
+        count,
+        mode="fixed_test",
+        max_agents=LIVE_TEST_MAX_AGENTS,
+    )
+    return jsonify(
+        {
+            "agents": [p.to_dict() for p in profiles],
+            "agent_count": len(profiles),
+            "agent_generation": "fixed_test",
+        }
+    )
 
 
 @app.get("/api/status")
@@ -116,6 +161,14 @@ def simulation_start():
         body.get("llm_run_approved", body.get("confirm_llm_spend", False))
     )
     language = body.get("language")  # optional; default SIMULATION_LANGUAGE / de
+    agent_generation = body.get("agent_generation") or body.get("generation")
+    raw_agent_count = body.get("agent_count", body.get("num_agents"))
+    agent_count_i = None
+    if raw_agent_count is not None:
+        try:
+            agent_count_i = int(raw_agent_count)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "agent_count muss eine Zahl sein"}), 400
 
     result = engine.start(
         scenario,
@@ -123,6 +176,8 @@ def simulation_start():
         max_steps=max_steps_i,
         llm_run_approved=llm_run_approved,
         language=language,
+        agent_count=agent_count_i,
+        agent_generation=agent_generation,
     )
     code = 200 if result.get("ok") else 409
     return jsonify(result), code

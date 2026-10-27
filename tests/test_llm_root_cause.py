@@ -135,7 +135,13 @@ def test_llm_path_captures_custom_prompt_context(results_dir: Path):
     engine = SimulationEngine(cfg, model_factory=factory)
     scenario = "Sollten Online-Foren KI-gestützte Moderation einsetzen?"
     result = engine.start(
-        scenario, mode="llm", max_steps=1, llm_run_approved=True, language="de"
+        scenario,
+        mode="llm",
+        max_steps=1,
+        llm_run_approved=True,
+        language="de",
+        agent_generation="fixed_test",
+        agent_count=5,
     )
     assert result["ok"] is True
     engine._thread.join(timeout=120)

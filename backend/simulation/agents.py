@@ -1,4 +1,4 @@
-"""Five fixed agent personalities for Phase 1."""
+"""Agent personalities — fixed test roster (Phase 1/2) + Phase-3 generator hooks."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -62,4 +62,5 @@ DEFAULT_AGENTS: list[AgentProfile] = [
 
 
 def profiles_payload() -> list[dict]:
+    """Default preview roster (fixed test five) for /api/agents before a run."""
     return [p.to_dict() for p in DEFAULT_AGENTS]
