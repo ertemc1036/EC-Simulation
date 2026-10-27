@@ -9,10 +9,12 @@ const health = ref<HealthResponse | null>(null)
 const agents = ref<AgentProfile[]>([])
 const sim = ref<SimulationState | null>(null)
 const scenario = ref('Sollten Online-Foren KI-gestützte Moderation einsetzen?')
-const mode = ref<'auto' | 'manual' | 'llm'>('auto')
+/** Default always ManualAction — never auto-enable LLM. */
+const mode = ref<'manual' | 'llm'>('manual')
 const maxSteps = ref(2)
 const busy = ref(false)
 const error = ref<string | null>(null)
+const showLlmConfirm = ref(false)
 let socket: Socket | null = null
 
 const llmBanner = computed(() => {
@@ -21,7 +23,7 @@ const llmBanner = computed(() => {
   if (cfg.llm_mode_available) {
     return {
       tone: 'ok' as const,
-      text: `LLM bereit (${cfg.openai_model}). Modus „llm“ / „auto“ nutzt echte OASIS LLMAction. Limits: ${cfg.max_llm_calls_per_run ?? '—'} Calls, ${cfg.max_tokens_per_run ?? '—'} Tokens/Run, $${cfg.max_cost_usd_per_run ?? '—'} USD, retries=${cfg.llm_max_retries ?? '—'}, Memory-Fenster ${cfg.agent_memory_window ?? '—'}.`,
+      text: `LLM bereit (${cfg.openai_model}). Start nur nach expliziter Freigabe. Limits: ${cfg.max_llm_calls_per_run ?? '—'} Calls, ${cfg.max_tokens_per_run ?? '—'} Tokens/Run, $${cfg.max_cost_usd_per_run ?? '—'} USD, retries=${cfg.llm_max_retries ?? '—'}, Memory-Fenster ${cfg.agent_memory_window ?? '—'}.`,
     }
   }
   return {
@@ -29,6 +31,30 @@ const llmBanner = computed(() => {
     text:
       cfg.llm_mode_blocked_reason ||
       'Kein API-Key konfiguriert — Simulation nur im ManualAction-Modus (echte OASIS-Umgebung, StubModel, keine API-Calls).',
+  }
+})
+
+const llmConfirmSummary = computed(() => {
+  const cfg = health.value?.config
+  const agentCount = agents.value.length || cfg?.max_agents || 5
+  const rounds = Math.min(maxSteps.value || 2, cfg?.max_simulation_steps ?? 2)
+  const callLimit = cfg?.max_llm_calls_per_run ?? 10
+  const model = cfg?.openai_model ?? '—'
+  const est =
+    cfg?.estimated_max_cost_usd ??
+    cfg?.max_cost_usd_per_run ??
+    0.2
+  const disclaimer =
+    cfg?.cost_estimate_disclaimer ||
+    'Kostenschätzung auf Basis der konfigurierten Preise; die Provider-Abrechnung kann abweichen.'
+  return {
+    model,
+    agentCount,
+    rounds,
+    callLimit,
+    estimatedMaxCost: Number(est),
+    hardCostCap: cfg?.max_cost_usd_per_run ?? 0.2,
+    disclaimer,
   }
 })
 
@@ -54,18 +80,40 @@ async function refreshSim() {
   sim.value = await res.json()
 }
 
-async function startSimulation() {
+function requestStart() {
+  error.value = null
+  if (mode.value === 'llm') {
+    showLlmConfirm.value = true
+    return
+  }
+  void startSimulation(false)
+}
+
+function cancelLlmConfirm() {
+  showLlmConfirm.value = false
+}
+
+function confirmLlmStart() {
+  showLlmConfirm.value = false
+  void startSimulation(true)
+}
+
+async function startSimulation(llmRunApproved: boolean) {
   error.value = null
   busy.value = true
   try {
+    const body: Record<string, unknown> = {
+      scenario: scenario.value,
+      mode: mode.value,
+      max_steps: maxSteps.value,
+    }
+    if (mode.value === 'llm') {
+      body.llm_run_approved = llmRunApproved === true
+    }
     const res = await fetch(`${API}/api/simulation/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scenario: scenario.value,
-        mode: mode.value,
-        max_steps: maxSteps.value,
-      }),
+      body: JSON.stringify(body),
     })
     const data = await res.json()
     if (!res.ok || data.ok === false) {
@@ -117,21 +165,68 @@ onUnmounted(() => {
         <label>
           Modus
           <select v-model="mode">
-            <option value="auto">auto (LLM falls Key, sonst Manual)</option>
-            <option value="manual">manual (StubModel, keine LLM-Calls)</option>
-            <option value="llm">llm (benötigt API-Key im Backend-.env)</option>
+            <option value="manual">manual (StubModel, keine LLM-Calls) — Standard</option>
+            <option value="llm">llm (benötigt Freigabe + API-Key im Backend-.env)</option>
           </select>
         </label>
         <label>
           Schritte
           <input v-model.number="maxSteps" type="number" min="1" max="2" />
         </label>
-        <button class="cta" :disabled="busy || sim?.status === 'running'" @click="startSimulation">
+        <button class="cta" :disabled="busy || sim?.status === 'running'" @click="requestStart">
           {{ sim?.status === 'running' ? 'Läuft…' : 'Simulation starten' }}
         </button>
       </div>
       <p v-if="error" class="err">{{ error }}</p>
     </section>
+
+    <div
+      v-if="showLlmConfirm"
+      class="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="llm-confirm-title"
+      @click.self="cancelLlmConfirm"
+    >
+      <div class="modal">
+        <h2 id="llm-confirm-title">LLM-Lauf freigeben?</h2>
+        <p class="lede-sm">
+          Es werden echte Provider-Calls ausgelöst. Ohne diese Freigabe blockiert das Backend den Start.
+        </p>
+        <dl class="confirm-grid">
+          <div>
+            <dt>Modell</dt>
+            <dd class="mono">{{ llmConfirmSummary.model }}</dd>
+          </div>
+          <div>
+            <dt>Agenten</dt>
+            <dd>{{ llmConfirmSummary.agentCount }}</dd>
+          </div>
+          <div>
+            <dt>Runden</dt>
+            <dd>{{ llmConfirmSummary.rounds }}</dd>
+          </div>
+          <div>
+            <dt>Call-Limit</dt>
+            <dd>{{ llmConfirmSummary.callLimit }}</dd>
+          </div>
+          <div>
+            <dt>Geschätzte max. Kosten</dt>
+            <dd class="mono">
+              ~${{ llmConfirmSummary.estimatedMaxCost.toFixed(4) }}
+              <span class="muted"> (Hard-Cap ${{ llmConfirmSummary.hardCostCap }})</span>
+            </dd>
+          </div>
+        </dl>
+        <p class="disclaimer">{{ llmConfirmSummary.disclaimer }}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" @click="cancelLlmConfirm">Abbrechen</button>
+          <button type="button" class="cta" :disabled="busy" @click="confirmLlmStart">
+            Freigeben &amp; starten
+          </button>
+        </div>
+      </div>
+    </div>
 
     <section class="status-strip" v-if="sim">
       <div>
@@ -161,6 +256,7 @@ onUnmounted(() => {
       <p class="lede-sm">
         Getrennt vom Aktionsprotokoll: echte/injizierte Modellaufrufe, Tokens und
         Kostenschätzung — nicht die simulierten Platform-Aktionen.
+        {{ sim.cost_summary?.cost_estimate_disclaimer || 'Provider-Abrechnung kann abweichen.' }}
       </p>
       <div class="cost-grid">
         <div>
@@ -255,6 +351,7 @@ onUnmounted(() => {
           <li>camel-ai {{ health.versions['camel-ai'] }}</li>
           <li>mcp {{ health.versions.mcp }}</li>
           <li>API-Key im Frontend: {{ health.config.api_key_exposed === false ? 'nein' : '?' }}</li>
+          <li>LLM-Freigabe nötig: {{ health.config.llm_run_requires_approval ? 'ja' : '—' }}</li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
       </div>
@@ -380,6 +477,77 @@ input {
 .cta:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 0.75rem 1.1rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(6, 12, 10, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  animation: fade 0.2s ease both;
+}
+
+.modal {
+  width: min(32rem, 100%);
+  background: linear-gradient(165deg, #1a3229, #101c18 70%);
+  border: 1px solid var(--line);
+  padding: 1.35rem 1.4rem 1.2rem;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  animation: rise 0.25s ease both;
+}
+
+.modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.45rem;
+}
+
+.confirm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+  margin: 1rem 0;
+}
+
+.confirm-grid dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0;
+}
+
+.confirm-grid dd {
+  margin: 0.15rem 0 0;
+  font-size: 1rem;
+}
+
+.disclaimer {
+  font-size: 0.86rem;
+  color: var(--warn);
+  line-height: 1.4;
+  margin: 0 0 1rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .status-strip {
@@ -552,11 +720,21 @@ h2 {
   }
 }
 
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (max-width: 900px) {
   .grid,
   .row,
   .status-strip,
-  .cost-grid {
+  .cost-grid,
+  .confirm-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -10,6 +10,17 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
+# Absolute live-test ceilings — env may be lower, never higher.
+LIVE_TEST_MAX_AGENTS = 5
+LIVE_TEST_MAX_ROUNDS = 2
+LIVE_TEST_MAX_LLM_CALLS = 10
+LIVE_TEST_MAX_RETRIES = 0
+
+COST_ESTIMATE_DISCLAIMER = (
+    "Kostenschätzung auf Basis der konfigurierten USD/1M-Preise; "
+    "die Provider-Abrechnung kann abweichen."
+)
+
 
 def _bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -44,6 +55,7 @@ class Settings:
     max_cost_usd_per_run: float
     llm_max_retries: int
     agent_memory_window: int
+    max_agents: int
     price_input_per_1m: float
     price_output_per_1m: float
     request_timeout_seconds: int
@@ -67,6 +79,27 @@ class Settings:
     def llm_mode_available(self) -> bool:
         return self.allow_llm_mode and self.llm_configured
 
+    def estimate_max_run_cost_usd(self, *, rounds: int | None = None) -> float:
+        """Conservative upper bound for a full LLM run (may exceed provider bill)."""
+        steps = rounds if rounds is not None else self.max_simulation_steps
+        steps = max(1, min(steps, self.max_simulation_steps, LIVE_TEST_MAX_ROUNDS))
+        # Budget: one model call per agent per round, capped by call limit.
+        planned_calls = min(
+            self.max_agents * steps,
+            self.max_llm_calls_per_run,
+            LIVE_TEST_MAX_LLM_CALLS,
+        )
+        # Conservative: each call may use max_tokens_per_call for BOTH sides.
+        per_call = (
+            self.max_tokens_per_call / 1_000_000.0 * self.price_input_per_1m
+            + self.max_tokens_per_call / 1_000_000.0 * self.price_output_per_1m
+        )
+        estimated = planned_calls * per_call
+        # Soft display ceiling: never advertise above configured hard cost gate.
+        if self.max_cost_usd_per_run > 0:
+            return round(min(estimated, self.max_cost_usd_per_run), 6)
+        return round(estimated, 6)
+
     def status_payload(self) -> dict:
         """Public status — never includes API keys."""
         return {
@@ -82,17 +115,28 @@ class Settings:
                     else "ALLOW_LLM_MODE=false"
                 )
             ),
+            "llm_run_requires_approval": True,
+            "default_mode": "manual",
             "openai_base_url": self.openai_base_url,
             "openai_model": self.openai_model,
+            "max_agents": self.max_agents,
             "max_simulation_steps": self.max_simulation_steps,
             "max_llm_calls_per_run": self.max_llm_calls_per_run,
             "max_tokens_per_call": self.max_tokens_per_call,
             "max_tokens_per_run": self.max_tokens_per_run,
             "max_cost_usd_per_run": self.max_cost_usd_per_run,
+            "estimated_max_cost_usd": self.estimate_max_run_cost_usd(),
+            "cost_estimate_disclaimer": COST_ESTIMATE_DISCLAIMER,
             "llm_max_retries": self.llm_max_retries,
             "agent_memory_window": self.agent_memory_window,
             "price_input_per_1m_usd": self.price_input_per_1m,
             "price_output_per_1m_usd": self.price_output_per_1m,
+            "live_test_limits": {
+                "max_agents": LIVE_TEST_MAX_AGENTS,
+                "max_rounds": LIVE_TEST_MAX_ROUNDS,
+                "max_model_calls": LIVE_TEST_MAX_LLM_CALLS,
+                "max_retries": LIVE_TEST_MAX_RETRIES,
+            },
             "zep_enabled": self.zep_enabled,
             "zep_configured": bool(self.zep_api_key.strip()),
             "oasis_package": "camel-oasis",
@@ -112,17 +156,31 @@ def load_settings() -> Settings:
         ).split(",")
         if o.strip()
     ]
+    # Clamp to live-test ceilings so a loose .env cannot widen the first run.
+    max_steps = min(
+        max(1, _int("MAX_SIMULATION_STEPS", LIVE_TEST_MAX_ROUNDS)),
+        LIVE_TEST_MAX_ROUNDS,
+    )
+    max_calls = min(
+        max(1, _int("MAX_LLM_CALLS_PER_RUN", LIVE_TEST_MAX_LLM_CALLS)),
+        LIVE_TEST_MAX_LLM_CALLS,
+    )
+    max_retries = min(
+        max(0, _int("LLM_MAX_RETRIES", LIVE_TEST_MAX_RETRIES)),
+        LIVE_TEST_MAX_RETRIES,
+    )
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        max_simulation_steps=_int("MAX_SIMULATION_STEPS", 2),
-        max_llm_calls_per_run=_int("MAX_LLM_CALLS_PER_RUN", 10),
-        max_tokens_per_call=_int("MAX_TOKENS_PER_CALL", 500),
-        max_tokens_per_run=_int("MAX_TOKENS_PER_RUN", 20000),
+        max_simulation_steps=max_steps,
+        max_llm_calls_per_run=max_calls,
+        max_tokens_per_call=max(1, _int("MAX_TOKENS_PER_CALL", 500)),
+        max_tokens_per_run=max(1, _int("MAX_TOKENS_PER_RUN", 20000)),
         max_cost_usd_per_run=_float("MAX_COST_USD_PER_RUN", 0.20),
-        llm_max_retries=_int("LLM_MAX_RETRIES", 0),
+        llm_max_retries=max_retries,
         agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
+        max_agents=LIVE_TEST_MAX_AGENTS,
         price_input_per_1m=_float("LLM_PRICE_INPUT_PER_1M", 0.40),
         price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 1.60),
         request_timeout_seconds=_int("REQUEST_TIMEOUT_SECONDS", 60),

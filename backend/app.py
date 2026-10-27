@@ -88,20 +88,40 @@ def simulation_state():
     return jsonify(engine.get_state())
 
 
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 @app.post("/api/simulation/start")
 def simulation_start():
     body = request.get_json(silent=True) or {}
     scenario = (body.get("scenario") or "").strip()
     if not scenario:
         return jsonify({"ok": False, "error": "scenario ist erforderlich"}), 400
-    mode = body.get("mode")  # auto|manual|llm
+    mode = body.get("mode")  # manual|llm (auto → manual; never silent LLM)
     max_steps = body.get("max_steps")
     try:
         max_steps_i = int(max_steps) if max_steps is not None else None
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "max_steps muss eine Zahl sein"}), 400
 
-    result = engine.start(scenario, mode=mode, max_steps=max_steps_i)
+    # Explicit per-run approval required for LLM (backend-enforced, not UI-only).
+    llm_run_approved = _truthy(
+        body.get("llm_run_approved", body.get("confirm_llm_spend", False))
+    )
+
+    result = engine.start(
+        scenario,
+        mode=mode,
+        max_steps=max_steps_i,
+        llm_run_approved=llm_run_approved,
+    )
     code = 200 if result.get("ok") else 409
     return jsonify(result), code
 

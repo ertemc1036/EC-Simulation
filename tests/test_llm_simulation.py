@@ -29,7 +29,9 @@ def results_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_llm_blocked_without_key_and_without_injection(results_dir: Path):
     cfg = load_settings()
     engine = SimulationEngine(cfg)
-    result = engine.start("Szenario", mode="llm", max_steps=1)
+    result = engine.start(
+        "Szenario", mode="llm", max_steps=1, llm_run_approved=True
+    )
     assert result["ok"] is False
     assert result["state"]["status"] == "blocked"
     assert "OPENAI_API_KEY" in (result["error"] or "")
@@ -44,6 +46,7 @@ def test_agent_interactions_via_llm_action(results_dir: Path):
         "Sollten Foren KI-Moderation einsetzen?",
         mode="llm",
         max_steps=2,
+        llm_run_approved=True,
     )
     assert result["ok"] is True
     assert result["state"]["mode"] == "llm"
@@ -78,7 +81,9 @@ def test_cost_call_limit_stops_llm_rounds(results_dir: Path, monkeypatch: pytest
     engine = SimulationEngine(
         cfg, model_factory=lambda aid: ScriptedReactiveModel(agent_id=aid)
     )
-    result = engine.start("Limit-Test", mode="llm", max_steps=5)
+    result = engine.start(
+        "Limit-Test", mode="llm", max_steps=5, llm_run_approved=True
+    )
     assert result["ok"] is True
     engine._thread.join(timeout=120)
     state = engine.get_state()
@@ -86,6 +91,7 @@ def test_cost_call_limit_stops_llm_rounds(results_dir: Path, monkeypatch: pytest
     assert state["cost_summary"]["api_calls"] <= 3
     assert state["cost_summary"]["limit_hit"]
     assert "Call-Limit" in state["cost_summary"]["limit_hit"]
+    assert state["cost_summary"]["cost_estimate_disclaimer"]
 
 
 def test_cost_token_limit_blocks_before_call():
@@ -177,7 +183,9 @@ def test_llm_error_handling_soft_stop(results_dir: Path):
         return m
 
     engine = SimulationEngine(cfg, model_factory=factory)
-    result = engine.start("Fehlerpfad", mode="llm", max_steps=1)
+    result = engine.start(
+        "Fehlerpfad", mode="llm", max_steps=1, llm_run_approved=True
+    )
     assert result["ok"] is True
     engine._thread.join(timeout=60)
     state = engine.get_state()

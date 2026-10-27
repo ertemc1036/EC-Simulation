@@ -26,7 +26,13 @@ from oasis import (
     UserInfo,
 )
 
-from backend.config import Settings, settings as default_settings
+from backend.config import (
+    LIVE_TEST_MAX_AGENTS,
+    LIVE_TEST_MAX_LLM_CALLS,
+    LIVE_TEST_MAX_ROUNDS,
+    Settings,
+    settings as default_settings,
+)
 from backend.simulation.agents import DEFAULT_AGENTS
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.manual_script import build_manual_rounds
@@ -126,13 +132,22 @@ class SimulationEngine:
 
     def _new_tracker(self) -> CostTracker:
         return CostTracker(
-            max_calls=self.cfg.max_llm_calls_per_run,
+            max_calls=min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS),
             max_tokens=self.cfg.max_tokens_per_run,
             price_input_per_1m=self.cfg.price_input_per_1m,
             price_output_per_1m=self.cfg.price_output_per_1m,
             max_cost_usd=self.cfg.max_cost_usd_per_run,
             model_name=self.cfg.openai_model,
+            max_tokens_per_call=self.cfg.max_tokens_per_call,
         )
+
+    def _is_busy(self) -> bool:
+        """One simulation at a time — running state or live worker thread."""
+        if self.state.status == "running":
+            return True
+        if self._thread is not None and self._thread.is_alive():
+            return True
+        return False
 
     def _sync_cost_to_state(self) -> None:
         if self._tracker is None:
@@ -147,16 +162,49 @@ class SimulationEngine:
         *,
         mode: str | None = None,
         max_steps: int | None = None,
+        llm_run_approved: bool = False,
     ) -> dict[str, Any]:
         with self._lock:
-            if self.state.status == "running":
+            if self._is_busy():
                 return {
                     "ok": False,
-                    "error": "Simulation läuft bereits.",
+                    "error": "Simulation läuft bereits — parallele Läufe sind deaktiviert.",
                     "state": self.state.to_dict(),
                 }
 
-            requested = (mode or "auto").lower()
+            # Default is always ManualAction. "auto" must never silently enable LLM.
+            requested = (mode or "manual").lower().strip()
+            if requested in {"", "auto"}:
+                requested = "manual"
+            if requested not in {"manual", "llm"}:
+                return {
+                    "ok": False,
+                    "error": f"Unbekannter Modus '{mode}'. Erlaubt: manual | llm.",
+                    "state": self.state.to_dict(),
+                }
+
+            # Approval is enforced before key/availability checks so the gate
+            # cannot be bypassed by frontend-only confirmation.
+            if requested == "llm" and not llm_run_approved:
+                msg = (
+                    "LLM-Lauf ohne explizite Freigabe blockiert. "
+                    "Sende llm_run_approved=true nach Bestätigung im Dashboard "
+                    "(Modell, Agenten, Runden, Call-Limit, geschätzte max. Kosten)."
+                )
+                self.state = SimulationState(
+                    run_id=str(uuid.uuid4())[:8],
+                    status="blocked",
+                    mode="llm",
+                    scenario=scenario,
+                    llm_configured=self.cfg.llm_configured,
+                    message=msg,
+                    agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
+                    cost_summary={},
+                )
+                blocked = self.state.to_dict()
+                self._emit("blocked")
+                return {"ok": False, "error": msg, "state": blocked}
+
             # Test injection may enable llm without a real key.
             llm_ok = self.cfg.llm_mode_available or self._model_factory is not None
             if requested == "llm" and not llm_ok:
@@ -168,20 +216,17 @@ class SimulationEngine:
                     llm_configured=self.cfg.llm_configured,
                     message=self.cfg.status_payload()["llm_mode_blocked_reason"]
                     or "LLM-Modus nicht verfügbar.",
-                    agents=[a.to_dict() for a in DEFAULT_AGENTS],
+                    agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
                     cost_summary={},
                 )
                 blocked = self.state.to_dict()
                 self._emit("blocked")
                 return {"ok": False, "error": self.state.message, "state": blocked}
 
-            if requested == "auto":
-                effective = "llm" if llm_ok else "manual"
-            else:
-                effective = requested
+            effective = requested
 
             steps = max_steps or self.cfg.max_simulation_steps
-            steps = max(1, min(steps, self.cfg.max_simulation_steps))
+            steps = max(1, min(steps, self.cfg.max_simulation_steps, LIVE_TEST_MAX_ROUNDS))
 
             run_id = (
                 datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -195,15 +240,19 @@ class SimulationEngine:
                 if self._model_factory is not None:
                     message = (
                         "LLM-Modus (Test-Injection): echte OASIS LLMAction, "
-                        "kein kostenpflichtiger Provider-Call."
+                        "kein kostenpflichtiger Provider-Call. Freigabe bestätigt."
                     )
                 else:
+                    est = self.cfg.estimate_max_run_cost_usd(rounds=steps)
                     message = (
                         "LLM-Modus: echte OASIS LLMAction über OpenAI-kompatibles Modell. "
-                        f"Limits: {self.cfg.max_llm_calls_per_run} Calls / "
+                        f"Freigabe bestätigt. Limits: "
+                        f"{min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS)} Calls / "
                         f"{self.cfg.max_tokens_per_run} Tokens / "
                         f"${self.cfg.max_cost_usd_per_run:.2f} / "
-                        f"{steps} Runden / retries={self.cfg.llm_max_retries}."
+                        f"{steps} Runden / retries={self.cfg.llm_max_retries} / "
+                        f"geschätzte max. Kosten ~${est:.4f} "
+                        "(Provider-Abrechnung kann abweichen)."
                     )
             else:
                 message = (
@@ -225,7 +274,7 @@ class SimulationEngine:
                 max_steps=steps,
                 llm_configured=self.cfg.llm_configured,
                 message=message,
-                agents=[a.to_dict() for a in DEFAULT_AGENTS],
+                agents=[a.to_dict() for a in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]],
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -309,7 +358,8 @@ class SimulationEngine:
                 api_key=self.cfg.openai_api_key,
                 url=self.cfg.openai_base_url,
                 timeout=float(self.cfg.request_timeout_seconds),
-                max_retries=max(0, int(self.cfg.llm_max_retries)),
+                # Live-test: never auto-retry paid calls (ceiling is 0).
+                max_retries=0,
                 model_config_dict={
                     "temperature": 0.7,
                     "max_tokens": self.cfg.max_tokens_per_call,
@@ -343,7 +393,7 @@ class SimulationEngine:
     def _build_agent_graph(self, mode: str) -> AgentGraph:
         graph = AgentGraph()
         available = ActionType.get_default_reddit_actions()
-        for profile in DEFAULT_AGENTS:
+        for profile in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]:
             inner = self._build_inner_model(mode, profile.agent_id)
             model = (
                 self._wrap_model(inner, profile.agent_id, mode)
@@ -448,8 +498,10 @@ class SimulationEngine:
                 self._sync_cost_to_state()
                 break
             # One parallel sim only; within a round, cap agents by remaining calls
-            # so 5 agents × N rounds cannot exceed MAX_LLM_CALLS_PER_RUN.
-            agents = [a for _, a in env.agent_graph.get_agents()][:remaining]
+            # and live-test agent ceiling (5 × 2 ≤ 10 calls).
+            agents = [
+                a for _, a in env.agent_graph.get_agents()
+            ][: min(remaining, LIVE_TEST_MAX_AGENTS)]
             actions = {agent: LLMAction() for agent in agents}
             for agent in agents:
                 self._append_action_log(

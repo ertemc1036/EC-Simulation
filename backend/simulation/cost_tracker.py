@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.config import COST_ESTIMATE_DISCLAIMER
+
 
 class LimitExceeded(RuntimeError):
     """Raised before a model call when a hard cost/call/token limit is hit."""
@@ -41,6 +43,7 @@ class CostTracker:
     price_output_per_1m: float
     max_cost_usd: float = 0.20
     model_name: str = ""
+    max_tokens_per_call: int = 500
     calls: list[ModelCallRecord] = field(default_factory=list)
     limit_hit: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -77,11 +80,20 @@ class CostTracker:
             + completion_tokens / 1_000_000.0 * self.price_output_per_1m
         )
 
+    def conservative_call_budget(self) -> tuple[int, int]:
+        """Assume a full completion budget (+ modest prompt) before each call."""
+        # Prompt floor: treat max_tokens_per_call as a conservative prompt ceiling
+        # so a large context cannot sneak past the run token/cost gates.
+        prompt = max(1, int(self.max_tokens_per_call))
+        completion = max(1, int(self.max_tokens_per_call))
+        return prompt, completion
+
     def check_can_call(
         self,
         *,
         estimated_prompt_tokens: int = 0,
         estimated_completion_tokens: int = 0,
+        conservative: bool = True,
     ) -> None:
         with self._lock:
             if self.limit_hit:
@@ -96,30 +108,51 @@ class CostTracker:
                     f"Token-Limit erreicht (MAX_TOKENS_PER_RUN={self.max_tokens})."
                 )
                 raise LimitExceeded(self.limit_hit)
-            if (
-                estimated_prompt_tokens
-                and self.total_tokens + estimated_prompt_tokens > self.max_tokens
-            ):
-                self.limit_hit = (
-                    f"Token-Limit würde überschritten "
-                    f"(MAX_TOKENS_PER_RUN={self.max_tokens})."
-                )
-                raise LimitExceeded(self.limit_hit)
             if self.max_cost_usd > 0 and self.estimated_cost_usd >= self.max_cost_usd:
                 self.limit_hit = (
                     f"Kosten-Limit erreicht (MAX_COST_USD_PER_RUN={self.max_cost_usd})."
                 )
                 raise LimitExceeded(self.limit_hit)
+
+            if conservative and not (
+                estimated_prompt_tokens or estimated_completion_tokens
+            ):
+                estimated_prompt_tokens, estimated_completion_tokens = (
+                    self.conservative_call_budget()
+                )
+            elif conservative:
+                # Fill missing side with full per-call budget.
+                c_prompt, c_completion = self.conservative_call_budget()
+                if not estimated_prompt_tokens:
+                    estimated_prompt_tokens = c_prompt
+                if not estimated_completion_tokens:
+                    estimated_completion_tokens = c_completion
+
+            projected_tokens = (
+                self.total_tokens
+                + int(estimated_prompt_tokens)
+                + int(estimated_completion_tokens)
+            )
+            if estimated_prompt_tokens or estimated_completion_tokens:
+                if projected_tokens > self.max_tokens:
+                    self.limit_hit = (
+                        f"Token-Limit würde überschritten "
+                        f"(MAX_TOKENS_PER_RUN={self.max_tokens}; "
+                        f"konservative Schätzung)."
+                    )
+                    raise LimitExceeded(self.limit_hit)
+
             if self.max_cost_usd > 0 and (
                 estimated_prompt_tokens or estimated_completion_tokens
             ):
                 projected = self.estimated_cost_usd + self.estimate_cost(
-                    estimated_prompt_tokens, estimated_completion_tokens
+                    int(estimated_prompt_tokens), int(estimated_completion_tokens)
                 )
                 if projected > self.max_cost_usd:
                     self.limit_hit = (
                         f"Kosten-Limit würde überschritten "
-                        f"(MAX_COST_USD_PER_RUN={self.max_cost_usd})."
+                        f"(MAX_COST_USD_PER_RUN={self.max_cost_usd}; "
+                        f"konservative Schätzung — Provider-Abrechnung kann abweichen)."
                     )
                     raise LimitExceeded(self.limit_hit)
 
@@ -179,6 +212,7 @@ class CostTracker:
             "estimated_cost_usd": self.estimated_cost_usd,
             "max_llm_calls_per_run": self.max_calls,
             "max_tokens_per_run": self.max_tokens,
+            "max_tokens_per_call": self.max_tokens_per_call,
             "max_cost_usd_per_run": self.max_cost_usd,
             "remaining_calls": self.remaining_calls(),
             "remaining_tokens": self.remaining_tokens(),
@@ -186,6 +220,7 @@ class CostTracker:
             "model": self.model_name,
             "price_input_per_1m_usd": self.price_input_per_1m,
             "price_output_per_1m_usd": self.price_output_per_1m,
+            "cost_estimate_disclaimer": COST_ESTIMATE_DISCLAIMER,
         }
 
     def to_dict(self) -> dict[str, Any]:

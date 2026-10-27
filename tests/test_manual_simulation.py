@@ -49,7 +49,17 @@ def test_manual_simulation_persists_results(engine: SimulationEngine, tmp_path: 
 
 
 def test_llm_mode_blocked_without_key(engine: SimulationEngine):
-    result = engine.start("Test", mode="llm", max_steps=1)
+    result = engine.start("Test", mode="llm", max_steps=1, llm_run_approved=True)
     assert result["ok"] is False
     assert result["state"]["status"] == "blocked"
     assert "OPENAI_API_KEY" in (result["error"] or "")
+
+
+def test_default_and_auto_modes_stay_manual(engine: SimulationEngine):
+    for mode in (None, "auto", "manual"):
+        result = engine.start("Manual default", mode=mode, max_steps=1)
+        assert result["ok"] is True
+        assert result["state"]["mode"] == "manual"
+        assert engine._thread is not None
+        engine._thread.join(timeout=120)
+        assert engine.get_state()["status"] == "completed"

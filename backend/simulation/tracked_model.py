@@ -75,13 +75,35 @@ class TrackedModelBackend(BaseModelBackend):
             source=self._source,
         )
 
+    def _estimate_prompt_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """Rough char-based prompt estimate; CostTracker still applies full budget."""
+        total_chars = 0
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, str):
+                total_chars += len(content)
+            elif content is not None:
+                total_chars += len(str(content))
+        # ~4 chars/token heuristic, never below 1.
+        return max(1, total_chars // 4)
+
+    def _preflight(self, messages: List[Dict[str, Any]]) -> None:
+        # Conservative gate: full completion budget + estimated/floor prompt.
+        est_prompt = self._estimate_prompt_tokens(messages)
+        est_completion = max(1, int(self._tracker.max_tokens_per_call))
+        self._tracker.check_can_call(
+            estimated_prompt_tokens=est_prompt,
+            estimated_completion_tokens=est_completion,
+            conservative=True,
+        )
+
     def _run(
         self,
         messages: List[Dict[str, Any]],
         response_format: Optional[Type[BaseModel]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, Stream[ChatCompletionChunk]]:
-        self._tracker.check_can_call()
+        self._preflight(messages)
         try:
             response = self._inner._run(messages, response_format, tools)
         except Exception as exc:
@@ -102,7 +124,7 @@ class TrackedModelBackend(BaseModelBackend):
         response_format: Optional[Type[BaseModel]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]:
-        self._tracker.check_can_call()
+        self._preflight(messages)
         try:
             response = await self._inner._arun(messages, response_format, tools)
         except Exception as exc:
