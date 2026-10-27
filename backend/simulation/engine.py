@@ -37,6 +37,11 @@ from backend.config import (
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.manual_script import build_manual_rounds
+from backend.simulation.prompt_debug import (
+    PROMPT_BUNDLE_ID,
+    PromptDebugBuffer,
+    action_dedup_key,
+)
 from backend.simulation.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
     build_decision_prompt,
@@ -134,6 +139,7 @@ class SimulationEngine:
         # Signature: agent_id -> BaseModelBackend (untracked; engine wraps it).
         self._model_factory = model_factory
         self._tracker: CostTracker | None = None
+        self._prompt_debug: PromptDebugBuffer = PromptDebugBuffer()
         self._agent_profiles: dict[int, AgentProfile] = {
             p.agent_id: p for p in DEFAULT_AGENTS[:LIVE_TEST_MAX_AGENTS]
         }
@@ -141,6 +147,7 @@ class SimulationEngine:
         self._run_scenario: str = ""
         self._limit_stop: bool = False
         self._failed: bool = False
+        self._custom_prompts_verified: bool = False
 
     def add_listener(self, cb: EventCallback) -> None:
         self._listeners.append(cb)
@@ -308,8 +315,10 @@ class SimulationEngine:
                 )
 
             self._tracker = self._new_tracker()
+            self._prompt_debug = PromptDebugBuffer()
             self._limit_stop = False
             self._failed = False
+            self._custom_prompts_verified = False
             self._run_language = sim_lang
             self._run_scenario = scenario.strip()
             self.state = SimulationState(
@@ -459,7 +468,11 @@ class SimulationEngine:
             "llm_api" if mode == "llm" else "stub"
         )
         return TrackedModelBackend(
-            inner, self._tracker, agent_id=agent_id, source=source
+            inner,
+            self._tracker,
+            agent_id=agent_id,
+            source=source,
+            prompt_debug=self._prompt_debug if mode == "llm" else None,
         )
 
     def _apply_memory_window(self, agent: SocialAgent) -> None:
@@ -531,17 +544,24 @@ class SimulationEngine:
                             "ts": _utc_now(),
                         }
                     )
+                evidence = engine._prompt_debug.last_for_agent(profile.agent_id)
                 engine._append_decision_log(
                     {
                         **decision_base,
                         "step": engine.state.step + 1,
                         "ok": True,
                         "tool_calls": tool_calls,
-                        "note": "scenario+goal injected; OASIS default decision prompt bypassed",
+                        "prompt_bundle_id": PROMPT_BUNDLE_ID,
+                        "prompt_evidence": evidence.to_dict() if evidence else None,
+                        "note": (
+                            "scenario+goal+language injected; "
+                            "OASIS default decision prompt bypassed"
+                        ),
                     }
                 )
                 return response
             except Exception as exc:
+                evidence = engine._prompt_debug.last_for_agent(profile.agent_id)
                 engine._append_decision_log(
                     {
                         **decision_base,
@@ -549,6 +569,8 @@ class SimulationEngine:
                         "ok": False,
                         "error": str(exc),
                         "tool_calls": [],
+                        "prompt_bundle_id": PROMPT_BUNDLE_ID,
+                        "prompt_evidence": evidence.to_dict() if evidence else None,
                     }
                 )
                 raise
@@ -593,6 +615,18 @@ class SimulationEngine:
                 self._apply_memory_window(agent)
                 self._install_decision_hook(
                     agent, profile, scenario=scenario, language=language
+                )
+                # Prove custom path is bound on the live agent instance.
+                sys_content = getattr(agent.system_message, "content", "") or ""
+                hook_is_custom = (
+                    agent.perform_action_by_llm
+                    is not SocialAgent.perform_action_by_llm
+                )
+                self._custom_prompts_verified = bool(
+                    hook_is_custom
+                    and "# ZIEL / OBJECTIVE" in sys_content
+                    and "You're a Reddit user" not in sys_content
+                    and "I'll present you with some tweets" not in sys_content
                 )
             graph.add_agent(agent)
         return graph
@@ -804,11 +838,11 @@ class SimulationEngine:
             self.state.comments = comments
             self.state.reactions = likes + dislikes
             if merge_llm_traces and traces:
+                # Normalize dict vs JSON-string args (and create_post content) so
+                # seed ManualAction / decision_hook entries are not re-imported.
                 known = {
-                    (
-                        e.get("agent_id"),
-                        e.get("action_type"),
-                        str(e.get("action_args")),
+                    action_dedup_key(
+                        e.get("agent_id"), e.get("action_type"), e.get("action_args")
                     )
                     for e in self.state.action_log
                     if e.get("kind") == "simulated_platform_action"
@@ -818,11 +852,10 @@ class SimulationEngine:
                     if action in {"sign_up", "refresh", "search_posts"}:
                         continue
                     info = t.get("info")
-                    key = (t.get("user_id"), action, str(info))
+                    key = action_dedup_key(t.get("user_id"), action, info)
                     if key in known:
                         continue
-                    # Skip duplicates already logged via decision_hook (args may
-                    # differ in serialization); prefer hook entries for goals.
+                    # Prefer decision_hook entries (carry goal/language).
                     already_hook = any(
                         e.get("via") == "decision_hook"
                         and e.get("agent_id") == t.get("user_id")
@@ -869,6 +902,15 @@ class SimulationEngine:
         self._sync_cost_to_state()
         out = self.cfg.results_dir / f"{self.state.run_id}.json"
         agents_n = min(len(DEFAULT_AGENTS), LIVE_TEST_MAX_AGENTS)
+        prompt_summary = self._prompt_debug.summary()
+        # Prefer live message captures; fall back to graph-install verification.
+        custom_active = bool(
+            prompt_summary.get("custom_prompts_active")
+            or (
+                self._custom_prompts_verified
+                and not prompt_summary.get("oasis_default_active")
+            )
+        )
         payload = {
             "meta": {
                 "run_id": self.state.run_id,
@@ -887,6 +929,10 @@ class SimulationEngine:
                     agents_n
                 ),
                 "db_isolation": "per_run_sqlite + OASIS_DB_PATH",
+                "prompt_bundle_id": PROMPT_BUNDLE_ID,
+                "custom_prompts_active": custom_active,
+                "custom_prompts_verified_at_build": self._custom_prompts_verified,
+                "prompt_debug": prompt_summary,
             },
             "agents": self.state.agents,
             "posts": self.state.posts,

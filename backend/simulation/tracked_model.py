@@ -9,6 +9,7 @@ from openai import AsyncStream, Stream
 from pydantic import BaseModel
 
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
+from backend.simulation.prompt_debug import PromptDebugBuffer
 
 
 def _usage_from_response(response: Any) -> tuple[int, int]:
@@ -30,6 +31,7 @@ class TrackedModelBackend(BaseModelBackend):
         *,
         agent_id: int | None = None,
         source: str = "llm_api",
+        prompt_debug: PromptDebugBuffer | None = None,
     ) -> None:
         # Mirror inner config so CAMEL tooling sees a normal backend.
         super().__init__(
@@ -46,7 +48,15 @@ class TrackedModelBackend(BaseModelBackend):
         self._tracker = tracker
         self._agent_id = agent_id
         self._source = source
+        self._prompt_debug = prompt_debug
 
+    def _capture_prompts(self, messages: List[Dict[str, Any]]) -> None:
+        if self._prompt_debug is None:
+            return
+        # Fingerprints + markers only — never persists api_key / Authorization.
+        self._prompt_debug.record(
+            messages, agent_id=self._agent_id, source=self._source
+        )
     @property
     def token_counter(self):
         return self._inner.token_counter
@@ -104,6 +114,7 @@ class TrackedModelBackend(BaseModelBackend):
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, Stream[ChatCompletionChunk]]:
         self._preflight(messages)
+        self._capture_prompts(messages)
         try:
             response = self._inner._run(messages, response_format, tools)
         except Exception as exc:
@@ -125,6 +136,7 @@ class TrackedModelBackend(BaseModelBackend):
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]:
         self._preflight(messages)
+        self._capture_prompts(messages)
         try:
             response = await self._inner._arun(messages, response_format, tools)
         except Exception as exc:
