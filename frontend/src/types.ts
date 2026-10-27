@@ -174,5 +174,11 @@ export interface HealthResponse {
     phase?: string
     api_key_exposed?: boolean
   }
+  runtime?: {
+    phase?: string
+    code_revision?: string
+    expects_phase?: string
+    port?: number
+  }
   zep: Record<string, unknown>
 }

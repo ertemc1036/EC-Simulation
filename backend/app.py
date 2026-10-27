@@ -1,6 +1,7 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 1."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 3."""
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import sys
 from pathlib import Path
@@ -17,6 +18,28 @@ from backend.config import LIVE_TEST_MAX_AGENTS, settings  # noqa: E402
 from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
+
+# Fingerprint of key Phase-3 modules — dashboard can detect a stale :5001 process.
+_PHASE3_MARKERS = (
+    ROOT / "backend" / "app.py",
+    ROOT / "backend" / "config.py",
+    ROOT / "backend" / "simulation" / "engine.py",
+    ROOT / "backend" / "simulation" / "agent_generator.py",
+)
+
+
+def _code_revision() -> str:
+    h = hashlib.sha1()
+    for path in _PHASE3_MARKERS:
+        try:
+            h.update(path.read_bytes())
+        except OSError:
+            h.update(b"missing")
+    return h.hexdigest()[:12]
+
+
+CODE_REVISION = _code_revision()
+EXPECTED_PHASE = "3"
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": settings.cors_origins}})
@@ -50,6 +73,7 @@ def health():
     except Exception as exc:  # pragma: no cover
         oasis_error = str(exc)
 
+    cfg = settings.status_payload()
     return jsonify(
         {
             "ok": True,
@@ -62,7 +86,13 @@ def health():
                 "flask": _pkg_version("flask"),
                 "openai": _pkg_version("openai"),
             },
-            "config": settings.status_payload(),
+            "config": cfg,
+            "runtime": {
+                "phase": cfg.get("phase") or EXPECTED_PHASE,
+                "code_revision": CODE_REVISION,
+                "expects_phase": EXPECTED_PHASE,
+                "port": settings.flask_port,
+            },
             "zep": engine.zep.status,
         }
     )
@@ -72,7 +102,8 @@ def health():
 def agents():
     """Preview profiles. Query: scenario, count, generation=dynamic|fixed_test."""
     scenario = (request.args.get("scenario") or "").strip()
-    generation = (request.args.get("generation") or "fixed_test").strip().lower()
+    # Phase 3 default is dynamic — fixed_test only when explicitly requested.
+    generation = (request.args.get("generation") or "dynamic").strip().lower()
     raw_count = request.args.get("count")
     try:
         count = int(raw_count) if raw_count is not None else LIVE_TEST_MAX_AGENTS

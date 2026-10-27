@@ -6,6 +6,9 @@ scenario text. Offline/deterministic so tests never call a provider.
 Modes:
 - ``fixed_test`` — exactly the Phase-1/2 DEFAULT_AGENTS roster (5), for regression.
 - ``dynamic`` — scenario-derived unique profiles (default for configurable counts).
+
+For scenarios that name stakeholders (e.g. «Bürger, Unternehmen, Politiker und
+Verkehrsbetriebe»), those roles become the primary agent identities.
 """
 from __future__ import annotations
 
@@ -56,6 +59,59 @@ _ARCHETYPES: list[dict[str, str]] = [
     },
 ]
 
+# Role → persona framing when the scenario names stakeholders explicitly.
+_ROLE_PERSONAS: dict[str, dict[str, str]] = {
+    "bürger": {
+        "name": "Bürgerstimme",
+        "slug": "buerger",
+        "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
+        "goal": "Alltagsfolgen und Gerechtigkeit für Anwohnende sichtbar machen.",
+        "style": "direkt, erfahrungsbezogen, pragmatisch",
+    },
+    "buerger": {
+        "name": "Bürgerstimme",
+        "slug": "buerger",
+        "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
+        "goal": "Alltagsfolgen und Gerechtigkeit für Anwohnende sichtbar machen.",
+        "style": "direkt, erfahrungsbezogen, pragmatisch",
+    },
+    "unternehmen": {
+        "name": "Unternehmensvertretung",
+        "slug": "unternehmen",
+        "description": "Vertritt Betriebe, Lieferketten und wirtschaftliche Planungssicherheit.",
+        "goal": "Wirtschaftliche Risiken und praktikable Übergänge benennen.",
+        "style": "kostenbewusst, lösungsorientiert, nüchtern",
+    },
+    "politiker": {
+        "name": "Politikstimme",
+        "slug": "politiker",
+        "description": "Wägt Mehrheiten, Recht und Umsetzbarkeit ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
+    "verkehrsbetriebe": {
+        "name": "Verkehrsbetrieb",
+        "slug": "verkehrsbetriebe",
+        "description": "Fokussiert Kapazität, Takt und Betrieb öffentlicher Verkehrsmittel.",
+        "goal": "Betriebsfähigkeit und Ausbau des ÖPNV konkretisieren.",
+        "style": "betriebsnah, zahlenorientiert, dienstleistungsbezogen",
+    },
+    "anwohnende": {
+        "name": "Anwohnendenstimme",
+        "slug": "anwohnende",
+        "description": "Betont Lärm, Sicherheit und Alltag vor der Haustür.",
+        "goal": "Lokale Auswirkungen und Mitspracherechte stärken.",
+        "style": "nahbar, kritisch, lokal",
+    },
+    "handel": {
+        "name": "Handelsstimme",
+        "slug": "handel",
+        "description": "Vertritt Ladenlokale, Kundenfrequenz und Anlieferung.",
+        "goal": "Erreichbarkeit und Umsätze im Blick behalten.",
+        "style": "praktisch, kundenbezogen",
+    },
+}
+
 _FIRST_NAMES = [
     "Alex",
     "Blake",
@@ -80,6 +136,7 @@ _STOP = frozenset(
         "eine",
         "einer",
         "einem",
+        "einen",
         "den",
         "dem",
         "des",
@@ -107,6 +164,34 @@ _STOP = frozenset(
         "was",
         "wer",
         "ob",
+        "wenn",
+        "dann",
+        "aber",
+        "noch",
+        "nur",
+        "schon",
+        "mehr",
+        "sehr",
+        "hier",
+        "dort",
+        "dazu",
+        "dabei",
+        "ab",
+        "bis",
+        "aus",
+        "nach",
+        "vor",
+        "über",
+        "unter",
+        "zwischen",
+        "innerhalb",
+        "außerhalb",
+        "passiert",
+        "geschehen",
+        "reagieren",
+        "reaktion",
+        "private",
+        "privaten",
         "the",
         "a",
         "an",
@@ -126,28 +211,150 @@ _STOP = frozenset(
         "we",
         "our",
         "their",
+        "what",
+        "when",
+        "how",
+        "if",
+        "happens",
+        "react",
+        "reacts",
+    }
+)
+
+# Weak fillers that often win token-order before real content nouns.
+_WEAK_LEAD = frozenset(
+    {
+        "passiert",
+        "wenn",
+        "wie",
+        "was",
+        "wer",
+        "ob",
+        "dann",
+        "dazu",
+        "dabei",
+        "geht",
+        "gibt",
+        "machen",
+        "werden",
+        "soll",
+        "sollte",
+        "kann",
+        "muss",
+        "private",
+        "privaten",
+        "innerhalb",
+        "außerhalb",
     }
 )
 
 
+def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
+    """Pull named stakeholder groups from the scenario text.
+
+    Handles patterns like «Wie reagieren Bürger, Unternehmen, Politiker und
+    Verkehrsbetriebe?» and bare role lists.
+    """
+    text = scenario or ""
+    roles: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        cleaned = re.sub(r"[^\wÄÖÜäöüß\-]+", "", raw, flags=re.UNICODE).strip("-")
+        if len(cleaned) < 3:
+            return
+        key = cleaned.lower().replace("ü", "ue").replace("ö", "oe").replace("ä", "ae")
+        if key in _STOP or key in seen:
+            return
+        seen.add(key)
+        roles.append(cleaned)
+
+    # «reagieren A, B, C und D» / «react A, B and C»
+    for match in re.finditer(
+        r"(?:reagieren|reaktion(?:en)?\s+(?:von|der|des)?|betroffen(?:e|en)?|"
+        r"stimmen\s+(?:von|der)|akteure?(?:\s+sind)?|stakeholders?(?:\s+are)?|"
+        r"react(?:s|ion)?(?:\s+of)?)\s*[:\s]+(.+?)(?:\?|$|\.)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        chunk = match.group(1)
+        parts = re.split(r"\s*(?:,|/|;|\bund\b|\boder\b|\band\b|\bor\b)\s*", chunk)
+        for part in parts:
+            _add(part)
+            if len(roles) >= limit:
+                return roles[:limit]
+
+    # Known role lexicon hits anywhere in the scenario (order of appearance).
+    lexicon = [
+        "Bürger",
+        "Buerger",
+        "Unternehmen",
+        "Politiker",
+        "Verkehrsbetriebe",
+        "Anwohnende",
+        "Anwohner",
+        "Handel",
+        "Gewerbe",
+        "Behörden",
+        "Verwaltung",
+        "Polizei",
+        "Taxi",
+        "Lieferdienste",
+    ]
+    lower = text.lower()
+    for role in lexicon:
+        if role.lower() in lower:
+            _add(role)
+            if len(roles) >= limit:
+                break
+
+    return roles[:limit]
+
+
 def extract_scenario_keywords(scenario: str, *, limit: int = 4) -> list[str]:
     """Pull distinctive tokens from the scenario for persona binding."""
+    roles = extract_stakeholder_roles(scenario, limit=limit)
+    if roles:
+        return roles[:limit]
+
     tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9-]{3,}", scenario or "")
+    scored: list[tuple[int, int, str]] = []
     seen: set[str] = set()
-    out: list[str] = []
-    for t in tokens:
+    for idx, t in enumerate(tokens):
         low = t.lower()
         if low in _STOP or low in seen:
             continue
         seen.add(low)
-        out.append(t)
-        if len(out) >= limit:
-            break
+        score = 0
+        if t[:1].isupper():
+            score += 3
+        if any(ch.isdigit() for ch in t):
+            score += 1
+        if "-" in t or len(t) >= 7:
+            score += 1
+        if low in _WEAK_LEAD:
+            score -= 4
+        scored.append((score, -idx, t))
+
+    scored.sort(reverse=True)
+    out = [t for score, _neg_idx, t in scored if score > 0][:limit]
+    if len(out) < limit:
+        for _score, _neg_idx, t in scored:
+            if t not in out:
+                out.append(t)
+            if len(out) >= limit:
+                break
     return out or ["Diskussion"]
 
 
 def _slugify(text: str) -> str:
     raw = re.sub(r"[^a-zA-Z0-9]+", "_", text.strip().lower()).strip("_")
+    raw = (
+        raw.replace("ä", "ae")
+        .replace("ö", "oe")
+        .replace("ü", "ue")
+        .replace("ß", "ss")
+    )
     return (raw or "agent")[:28]
 
 
@@ -164,6 +371,29 @@ def _unique_suffix(scenario: str, agent_id: int, slug: str) -> str:
     return digest[:6]
 
 
+def _persona_for_role(role: str, arch_fallback: dict[str, str]) -> dict[str, str]:
+    key = (
+        role.lower()
+        .replace("ü", "ue")
+        .replace("ö", "oe")
+        .replace("ä", "ae")
+        .replace("ß", "ss")
+    )
+    if key in _ROLE_PERSONAS:
+        return dict(_ROLE_PERSONAS[key])
+    # Generic role → blend with archetype voice but keep role identity.
+    return {
+        "name": role[:1].upper() + role[1:],
+        "slug": _slugify(role) or arch_fallback["slug"],
+        "description": (
+            f"Vertritt die Perspektive «{role}» und prüft Folgen für diese Gruppe. "
+            f"{arch_fallback['description']}"
+        ),
+        "goal": f"Interessen von {role} im Szenario klar vertreten. {arch_fallback['goal']}",
+        "style": arch_fallback["style"],
+    }
+
+
 def generate_dynamic_agents(
     scenario: str,
     count: int,
@@ -172,6 +402,7 @@ def generate_dynamic_agents(
 ) -> list[AgentProfile]:
     """Build ``count`` unique scenario-bound profiles (no clones)."""
     n = max(1, min(int(count), int(max_agents), MAX_GENERATABLE_AGENTS))
+    roles = extract_stakeholder_roles(scenario, limit=n)
     keywords = extract_scenario_keywords(scenario)
     topic = _topic_phrase(keywords)
     short = (scenario or "").strip()[:120] or "Offenes Diskussionsthema"
@@ -181,23 +412,35 @@ def generate_dynamic_agents(
 
     for i in range(n):
         arch = _ARCHETYPES[i % len(_ARCHETYPES)]
-        # Rotate first names so a second pass over archetypes still differs.
-        first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
-        suffix = _unique_suffix(short, i, arch["slug"])
-        display = f"{first} {arch['name']}"
-        # Collision guard (should be rare; force suffix into display if needed).
-        if display.lower() in used_names:
-            display = f"{first} {arch['name']} {suffix}"
-        user_name = f"{_slugify(first)}_{arch['slug']}_{suffix}"
+        if i < len(roles):
+            persona = _persona_for_role(roles[i], arch)
+            display = persona["name"]
+            # Disambiguate if the same role maps twice.
+            if display.lower() in used_names:
+                display = f"{persona['name']} {i + 1}"
+            user_name = f"{persona['slug']}_{_unique_suffix(short, i, persona['slug'])}"
+            description = (
+                f"{persona['description']} Bezieht Positionen explizit auf «{topic}» "
+                f"im Szenario: {short}."
+            )
+            goal = f"{persona['goal']} Fokus: {topic}."
+            style = persona["style"]
+        else:
+            first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
+            suffix = _unique_suffix(short, i, arch["slug"])
+            display = f"{first} {arch['name']}"
+            if display.lower() in used_names:
+                display = f"{first} {arch['name']} {suffix}"
+            user_name = f"{_slugify(first)}_{arch['slug']}_{suffix}"
+            description = (
+                f"{arch['description']} Bezieht Positionen explizit auf «{topic}» "
+                f"im Szenario: {short}."
+            )
+            goal = f"{arch['goal']} Fokus: {topic}."
+            style = arch["style"]
+
         if user_name in used_user_names:
             user_name = f"{user_name}_{i}"
-
-        description = (
-            f"{arch['description']} Bezieht Positionen explizit auf «{topic}» "
-            f"im Szenario: {short}."
-        )
-        goal = f"{arch['goal']} Fokus: {topic}."
-        style = arch["style"]
 
         profile = AgentProfile(
             agent_id=i,

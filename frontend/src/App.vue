@@ -48,6 +48,22 @@ const llmBanner = computed(() => {
   }
 })
 
+/** Stale Flask on :5001 (pre-Phase-3) shows Phase — and Alice…Eve despite dynamic. */
+const staleBackendBanner = computed(() => {
+  const h = health.value
+  if (!h) return null
+  const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
+  const hasRevision = Boolean(h.runtime?.code_revision)
+  const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
+  if (phase === '3' && hasRevision && hasGenModes) return null
+  return {
+    tone: 'warn' as const,
+    text:
+      'Backend wirkt veraltet (Phase ≠ 3 oder fehlende Phase-3-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst bleiben Alice…Eve, leeres Memory/KG und Phase —.',
+  }
+})
+
 const llmConfirmSummary = computed(() => {
   const cfg = health.value?.config
   const nAgents =
@@ -208,10 +224,25 @@ onUnmounted(() => {
       <span>{{ llmBanner.text }}</span>
     </section>
 
+    <section
+      v-if="staleBackendBanner"
+      class="banner"
+      :class="staleBackendBanner.tone"
+      aria-live="assertive"
+    >
+      <strong>Stale Backend</strong>
+      <span>{{ staleBackendBanner.text }}</span>
+    </section>
+
     <section class="controls">
       <label>
         Szenario
-        <textarea v-model="scenario" rows="3" maxlength="800" />
+        <textarea
+          v-model="scenario"
+          rows="3"
+          maxlength="800"
+          @change="refreshAgents"
+        />
       </label>
       <div class="row">
         <label>
@@ -450,14 +481,21 @@ onUnmounted(() => {
 
         <h2>Runtime</h2>
         <ul class="meta-list" v-if="health">
-          <li>Phase: {{ health.config.phase || '—' }}</li>
+          <li>
+            Phase:
+            {{ health.config.phase || health.runtime?.phase || '—' }}
+            <span v-if="health.runtime?.code_revision" class="mono">
+              · rev {{ health.runtime.code_revision }}
+            </span>
+          </li>
           <li>oasis import: {{ health.oasis_import_ok ? 'ok' : 'fail' }}</li>
           <li>camel-oasis {{ health.versions['camel-oasis'] }}</li>
           <li>mcp {{ health.versions.mcp }}</li>
           <li>API-Key im Frontend: {{ health.config.api_key_exposed === false ? 'nein' : '?' }}</li>
           <li>LLM-Freigabe nötig: {{ health.config.llm_run_requires_approval ? 'ja' : '—' }}</li>
           <li>Zep integriert: {{ health.config.zep_integrated === false ? 'nein (Vorbereitung)' : health.zep?.integrated === false ? 'nein' : '—' }}</li>
-          <li>KG-Backend: {{ health.config.knowledge_graph_backend || 'local' }}</li>
+          <li>KG-Backend: {{ health.config.knowledge_graph_backend || '—' }}</li>
+          <li>Agent-Gen-Default: {{ health.config.default_agent_generation || '—' }}</li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
       </div>
