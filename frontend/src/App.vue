@@ -14,6 +14,10 @@ const mode = ref<'manual' | 'llm'>('manual')
 /** Content language for LLM agents (default DE; overrides OASIS English prompts). */
 const language = ref('de')
 const maxSteps = ref(2)
+/** Phase 3: configurable agent count (live-test ceiling 5). */
+const agentCount = ref(5)
+/** dynamic = scenario-derived; fixed_test = classic 5-roster (truncated). */
+const agentGeneration = ref<'dynamic' | 'fixed_test'>('dynamic')
 const busy = ref(false)
 const error = ref<string | null>(null)
 const showLlmConfirm = ref(false)
@@ -46,7 +50,12 @@ const llmBanner = computed(() => {
 
 const llmConfirmSummary = computed(() => {
   const cfg = health.value?.config
-  const agentCount = agents.value.length || cfg?.max_agents || 5
+  const nAgents =
+    sim.value?.agent_count ||
+    agentCount.value ||
+    agents.value.length ||
+    cfg?.max_agents ||
+    5
   const rounds = Math.min(maxSteps.value || 2, cfg?.max_simulation_steps ?? 2)
   const callLimit = cfg?.max_llm_calls_per_run ?? 10
   const model = cfg?.openai_model ?? '—'
@@ -59,12 +68,37 @@ const llmConfirmSummary = computed(() => {
     'Kostenschätzung auf Basis der konfigurierten Preise; die Provider-Abrechnung kann abweichen.'
   return {
     model,
-    agentCount,
+    agentCount: nAgents,
     rounds,
     callLimit,
     estimatedMaxCost: Number(est),
     hardCostCap: cfg?.max_cost_usd_per_run ?? 0.2,
     disclaimer,
+    generation: agentGeneration.value,
+  }
+})
+
+const displayAgents = computed(() => {
+  if (sim.value?.agents?.length) return sim.value.agents
+  return agents.value
+})
+
+const memoryAgents = computed(() => {
+  const snap = sim.value?.agent_memory?.agents
+  if (!snap) return [] as Array<{ id: string; entries: Array<{ kind?: string; text?: string; step?: number | null }> }>
+  return Object.entries(snap).map(([id, entries]) => ({ id, entries: entries || [] }))
+})
+
+const graphSummary = computed(() => {
+  const g = sim.value?.knowledge_graph
+  if (!g) return null
+  return {
+    nodes: g.node_count ?? 0,
+    edges: g.edge_count ?? 0,
+    kinds: g.counts_by_kind || {},
+    relations: g.counts_by_relation || {},
+    sampleEdges: (g.edges || []).slice(0, 12),
+    note: g.note,
   }
 })
 
@@ -80,9 +114,14 @@ async function refreshHealth() {
 }
 
 async function refreshAgents() {
-  const res = await fetch(`${API}/api/agents`)
+  const params = new URLSearchParams({
+    count: String(agentCount.value),
+    generation: agentGeneration.value,
+  })
+  if (scenario.value.trim()) params.set('scenario', scenario.value.trim())
+  const res = await fetch(`${API}/api/agents?${params}`)
   const data = await res.json()
-  agents.value = data.agents
+  agents.value = data.agents || []
 }
 
 async function refreshSim() {
@@ -117,6 +156,8 @@ async function startSimulation(llmRunApproved: boolean) {
       mode: mode.value,
       max_steps: maxSteps.value,
       language: language.value,
+      agent_count: agentCount.value,
+      agent_generation: agentGeneration.value,
     }
     if (mode.value === 'llm') {
       body.llm_run_approved = llmRunApproved === true
@@ -157,8 +198,8 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Fünf Persönlichkeiten diskutieren dein Szenario in einer echten
-        camel-oasis-Umgebung — live im Dashboard.
+        Dynamische Multi-Agent-Simulation (MiroFish-ähnlich) in einer echten
+        camel-oasis-Umgebung — Profile, Feed, Memory und Relationen live.
       </p>
     </header>
 
@@ -188,6 +229,17 @@ onUnmounted(() => {
             <option value="fr">Français</option>
             <option value="es">Español</option>
             <option value="it">Italiano</option>
+          </select>
+        </label>
+        <label>
+          Agenten
+          <input v-model.number="agentCount" type="number" min="1" max="5" @change="refreshAgents" />
+        </label>
+        <label>
+          Generierung
+          <select v-model="agentGeneration" @change="refreshAgents">
+            <option value="dynamic">dynamic (aus Szenario, keine Klone)</option>
+            <option value="fixed_test">fixed_test (feste 5 / Testmodus)</option>
           </select>
         </label>
         <label>
@@ -221,7 +273,7 @@ onUnmounted(() => {
           </div>
           <div>
             <dt>Agenten</dt>
-            <dd>{{ llmConfirmSummary.agentCount }}</dd>
+            <dd>{{ llmConfirmSummary.agentCount }} ({{ llmConfirmSummary.generation }})</dd>
           </div>
           <div>
             <dt>Runden</dt>
@@ -267,6 +319,10 @@ onUnmounted(() => {
       <div>
         <span class="k">Schritt</span>
         <span class="v">{{ sim.step }} / {{ sim.max_steps }}</span>
+      </div>
+      <div>
+        <span class="k">Agenten</span>
+        <span class="v">{{ sim.agent_count ?? displayAgents.length }} · {{ sim.agent_generation || agentGeneration }}</span>
       </div>
       <div>
         <span class="k">Run</span>
@@ -319,18 +375,23 @@ onUnmounted(() => {
 
     <section class="grid">
       <div>
-        <h2>Agenten</h2>
+        <h2>Profile</h2>
+        <p class="lede-sm">
+          {{ displayAgents.length }} Agenten ·
+          {{ sim?.agent_generation || agentGeneration }}
+        </p>
         <ul class="agents">
-          <li v-for="a in agents" :key="a.agent_id">
+          <li v-for="a in displayAgents" :key="a.agent_id">
             <span class="name">{{ a.name }}</span>
             <span class="desc">{{ a.description }}</span>
             <span class="goal">Ziel: {{ a.goal }}</span>
+            <span class="desc">Stil: {{ a.style }}</span>
           </li>
         </ul>
       </div>
 
       <div>
-        <h2>Beiträge</h2>
+        <h2>Live-Feed</h2>
         <ul class="feed" v-if="sim?.posts?.length">
           <li v-for="p in sim.posts" :key="String(p.post_id)">
             <span class="meta">#{{ p.post_id }} · user {{ p.user_id }}</span>
@@ -342,7 +403,7 @@ onUnmounted(() => {
         <h2>Kommentare & Reaktionen</h2>
         <ul class="feed compact" v-if="sim && (sim.comments.length || sim.reactions.length)">
           <li v-for="c in sim.comments" :key="'c' + c.comment_id">
-            <span class="meta">Kommentar #{{ c.comment_id }} → Post {{ c.post_id }} · user {{ c.user_id }}</span>
+            <span class="meta">Kommentar/Reply #{{ c.comment_id }} → Post {{ c.post_id }} · user {{ c.user_id }}</span>
             <p>{{ c.content }}</p>
           </li>
           <li v-for="(r, i) in sim.reactions" :key="'r' + i">
@@ -372,7 +433,7 @@ onUnmounted(() => {
         <p v-else class="empty">Noch keine Aktionen.</p>
 
         <h2>Entscheidungen</h2>
-        <p class="lede-sm">Szenario + Ziel + Sprache je LLM-Entscheidung (Nachvollziehbarkeit).</p>
+        <p class="lede-sm">Szenario + Ziel + Sprache je LLM-Entscheidung.</p>
         <ol class="log" v-if="sim?.decision_log?.length">
           <li v-for="(d, i) in sim.decision_log" :key="'d' + i">
             <span class="badge src-llm">decision</span>
@@ -389,19 +450,59 @@ onUnmounted(() => {
 
         <h2>Runtime</h2>
         <ul class="meta-list" v-if="health">
+          <li>Phase: {{ health.config.phase || '—' }}</li>
           <li>oasis import: {{ health.oasis_import_ok ? 'ok' : 'fail' }}</li>
           <li>camel-oasis {{ health.versions['camel-oasis'] }}</li>
-          <li>camel-ai {{ health.versions['camel-ai'] }}</li>
           <li>mcp {{ health.versions.mcp }}</li>
           <li>API-Key im Frontend: {{ health.config.api_key_exposed === false ? 'nein' : '?' }}</li>
           <li>LLM-Freigabe nötig: {{ health.config.llm_run_requires_approval ? 'ja' : '—' }}</li>
-          <li>Sim-Sprache Default: {{ health.config.simulation_language || 'de' }}</li>
-          <li>
-            Calls/Runde:
-            {{ health.config.model_calls_per_round_required ?? '—' }}
-          </li>
+          <li>Zep integriert: {{ health.config.zep_integrated === false ? 'nein (Vorbereitung)' : health.zep?.integrated === false ? 'nein' : '—' }}</li>
+          <li>KG-Backend: {{ health.config.knowledge_graph_backend || 'local' }}</li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
+      </div>
+    </section>
+
+    <section class="mem-grid">
+      <div>
+        <h2>Memory</h2>
+        <p class="lede-sm">
+          Lokales begrenztes Agentengedächtnis
+          <span v-if="sim?.agent_memory?.max_entries_per_agent">
+            (max {{ sim.agent_memory.max_entries_per_agent }}/Agent)
+          </span>
+          — Zep vorbereitet, nicht integriert.
+        </p>
+        <div v-if="memoryAgents.length" class="mem-list">
+          <article v-for="m in memoryAgents" :key="m.id" class="mem-card">
+            <h3>Agent {{ m.id }}</h3>
+            <ul class="feed compact">
+              <li v-for="(e, i) in m.entries.slice(-5)" :key="i">
+                <span class="meta">{{ e.kind }} · s{{ e.step ?? '-' }}</span>
+                <p>{{ e.text }}</p>
+              </li>
+            </ul>
+          </article>
+        </div>
+        <p v-else class="empty">Noch keine Memory-Einträge.</p>
+      </div>
+      <div>
+        <h2>Relations</h2>
+        <p class="lede-sm" v-if="graphSummary">
+          {{ graphSummary.nodes }} Knoten · {{ graphSummary.edges }} Kanten —
+          Akteure / Themen / Aussagen / Beziehungen.
+        </p>
+        <ul class="meta-list" v-if="graphSummary">
+          <li v-for="(n, k) in graphSummary.kinds" :key="'k' + k">{{ k }}: {{ n }}</li>
+          <li v-for="(n, r) in graphSummary.relations" :key="'r' + r">{{ r }}: {{ n }}</li>
+        </ul>
+        <ol class="log" v-if="graphSummary?.sampleEdges?.length">
+          <li v-for="e in graphSummary.sampleEdges" :key="e.id">
+            <span class="mono">{{ e.relation }}</span>
+            · {{ e.source }} → {{ e.target }}
+          </li>
+        </ol>
+        <p v-else class="empty">Wissensgraph leer — nach dem Lauf sichtbar.</p>
       </div>
     </section>
   </div>
@@ -502,7 +603,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: 1.4fr 0.5fr auto;
+  grid-template-columns: 1.2fr 0.55fr 0.45fr 1fr 0.45fr auto;
   gap: 0.8rem;
   align-items: end;
 }
@@ -790,12 +891,34 @@ h2 {
   }
 }
 
+.mem-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  animation: rise 0.95s ease both 0.2s;
+}
+
+.mem-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mem-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .grid,
   .row,
   .status-strip,
   .cost-grid,
-  .confirm-grid {
+  .confirm-grid,
+  .mem-grid {
     grid-template-columns: 1fr;
   }
 }

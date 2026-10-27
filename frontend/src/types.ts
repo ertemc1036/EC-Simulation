@@ -67,6 +67,40 @@ export interface DecisionLogEntry {
   ts?: string
 }
 
+export interface KnowledgeGraph {
+  backend?: string
+  node_count?: number
+  edge_count?: number
+  counts_by_kind?: Record<string, number>
+  counts_by_relation?: Record<string, number>
+  nodes?: Array<{
+    id: string
+    kind: string
+    label: string
+    meta?: Record<string, unknown>
+  }>
+  edges?: Array<{
+    id: string
+    source: string
+    target: string
+    relation: string
+    meta?: Record<string, unknown>
+  }>
+  note?: string
+}
+
+export interface AgentMemorySnapshot {
+  backend?: string
+  zep_integrated?: boolean
+  max_entries_per_agent?: number
+  agent_count_with_memory?: number
+  agents?: Record<
+    string,
+    Array<{ kind?: string; text?: string; step?: number | null; ts?: string }>
+  >
+  note?: string
+}
+
 export interface SimulationState {
   run_id: string
   status: string
@@ -75,6 +109,8 @@ export interface SimulationState {
   language?: string
   step: number
   max_steps: number
+  agent_count?: number
+  agent_generation?: string
   llm_configured: boolean
   message: string
   stop_reason?: string | null
@@ -86,6 +122,8 @@ export interface SimulationState {
   decision_log?: DecisionLogEntry[]
   model_calls: ModelCallEntry[]
   cost_summary: CostSummary
+  agent_memory?: AgentMemorySnapshot
+  knowledge_graph?: KnowledgeGraph
   error: string | null
   result_path: string | null
   db_path: string | null
@@ -106,6 +144,10 @@ export interface HealthResponse {
     openai_model: string
     openai_base_url?: string
     max_agents?: number
+    default_agent_count?: number
+    default_agent_generation?: string
+    agent_generation_modes?: string[]
+    agent_local_memory_entries?: number
     max_simulation_steps: number
     max_llm_calls_per_run?: number
     max_tokens_per_call?: number
@@ -127,6 +169,9 @@ export interface HealthResponse {
     }
     zep_enabled: boolean
     zep_configured: boolean
+    zep_integrated?: boolean
+    knowledge_graph_backend?: string
+    phase?: string
     api_key_exposed?: boolean
   }
   zep: Record<string, unknown>

@@ -67,7 +67,10 @@ class Settings:
     max_cost_usd_per_run: float
     llm_max_retries: int
     agent_memory_window: int
+    agent_local_memory_entries: int
     max_agents: int
+    default_agent_count: int
+    default_agent_generation: str
     price_input_per_1m: float
     price_output_per_1m: float
     request_timeout_seconds: int
@@ -133,6 +136,10 @@ class Settings:
             "openai_base_url": self.openai_base_url,
             "openai_model": self.openai_model,
             "max_agents": self.max_agents,
+            "default_agent_count": self.default_agent_count,
+            "default_agent_generation": self.default_agent_generation,
+            "agent_generation_modes": ["dynamic", "fixed_test"],
+            "agent_local_memory_entries": self.agent_local_memory_entries,
             "max_simulation_steps": self.max_simulation_steps,
             "max_llm_calls_per_run": self.max_llm_calls_per_run,
             "max_tokens_per_call": self.max_tokens_per_call,
@@ -161,9 +168,12 @@ class Settings:
             "terminal_statuses": ["completed", "limit_reached", "failed"],
             "zep_enabled": self.zep_enabled,
             "zep_configured": bool(self.zep_api_key.strip()),
+            "zep_integrated": False,
+            "knowledge_graph_backend": "local",
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
+            "phase": "3",
         }
 
 
@@ -205,7 +215,15 @@ def load_settings() -> Settings:
         max_cost_usd_per_run=_float("MAX_COST_USD_PER_RUN", 0.20),
         llm_max_retries=max_retries,
         agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
+        agent_local_memory_entries=max(1, _int("AGENT_LOCAL_MEMORY_ENTRIES", 12)),
         max_agents=LIVE_TEST_MAX_AGENTS,
+        default_agent_count=min(
+            max(1, _int("DEFAULT_AGENT_COUNT", LIVE_TEST_MAX_AGENTS)),
+            LIVE_TEST_MAX_AGENTS,
+        ),
+        default_agent_generation=(
+            os.getenv("AGENT_GENERATION_MODE", "dynamic").strip().lower() or "dynamic"
+        ),
         price_input_per_1m=_float("LLM_PRICE_INPUT_PER_1M", 0.40),
         price_output_per_1m=_float("LLM_PRICE_OUTPUT_PER_1M", 1.60),
         request_timeout_seconds=_int("REQUEST_TIMEOUT_SECONDS", 60),
