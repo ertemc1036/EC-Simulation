@@ -45,6 +45,42 @@ def test_keywords_and_no_clones():
     # Scenario binding
     joined = " ".join(a.description + a.goal for a in agents)
     assert any(k in joined for k in kws)
+    # Must not silently fall back to Alice…Eve fixed roster
+    assert {a.user_name for a in agents} != {
+        "alice_analyst",
+        "bob_builder",
+        "cara_community",
+        "dan_devil",
+        "eve_empath",
+    }
+
+
+BERLIN_SCENARIO = (
+    "Was passiert, wenn Berlin ab 2030 private Autos innerhalb des S-Bahn-Rings "
+    "verbietet? Wie reagieren Bürger, Unternehmen, Politiker und Verkehrsbetriebe?"
+)
+
+
+def test_berlin_roles_not_alice_eve():
+    from backend.simulation.agent_generator import extract_stakeholder_roles
+
+    roles = extract_stakeholder_roles(BERLIN_SCENARIO)
+    assert "Bürger" in roles or "Buerger" in roles
+    assert "Unternehmen" in roles
+    assert "Politiker" in roles
+    assert "Verkehrsbetriebe" in roles
+    kws = extract_scenario_keywords(BERLIN_SCENARIO)
+    assert "passiert" not in {k.lower() for k in kws}
+    assert "wenn" not in {k.lower() for k in kws}
+    agents = generate_agents(BERLIN_SCENARIO, 5, mode="dynamic")
+    names = {a.name for a in agents}
+    assert "Alice Analyst" not in names
+    assert "Bob Builder" not in names
+    joined = " ".join(a.name + a.user_name + a.description for a in agents).lower()
+    assert "bürger" in joined or "buerger" in joined
+    assert "unternehmen" in joined
+    assert "politiker" in joined or "politik" in joined
+    assert "verkehr" in joined
 
 
 def test_fixed_test_roster_is_classic_five():
@@ -102,6 +138,48 @@ def test_dynamic_count_three(results_dir: Path):
     assert data["meta"]["zep_integrated"] is False
     assert "agent_memory" in data
     assert "knowledge_graph" in data
+
+
+def test_berlin_manual_memory_and_kg(results_dir: Path):
+    """Offline regression: Berlin Autoverbot → dynamic roles, phase=3, Memory+KG filled."""
+    cfg = load_settings()
+    engine = SimulationEngine(cfg)
+    result = engine.start(
+        BERLIN_SCENARIO,
+        mode="manual",
+        max_steps=2,
+        agent_count=5,
+        agent_generation="dynamic",
+    )
+    assert result["ok"] is True
+    assert result["state"]["agent_generation"] == "dynamic"
+    assert result["state"]["agent_count"] == 5
+    names = {a["name"] for a in result["state"]["agents"]}
+    assert "Alice Analyst" not in names
+    assert "Eve Empath" not in names
+    engine._thread.join(timeout=180)
+    state = engine.get_state()
+    assert state["status"] == "completed", state
+    assert state["agent_generation"] == "dynamic"
+    mem = state["agent_memory"]
+    assert mem and mem.get("agent_count_with_memory", 0) >= 1
+    assert mem.get("zep_integrated") is False
+    kg = state["knowledge_graph"]
+    assert kg and kg.get("node_count", 0) >= 5
+    assert kg.get("edge_count", 0) >= 1
+    path = Path(state["result_path"])
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["meta"]["phase"] == 3
+    assert data["meta"]["agent_generation"] == "dynamic"
+    assert data["agent_memory"]["agent_count_with_memory"] >= 1
+    assert data["knowledge_graph"]["node_count"] >= 5
+    assert {a["user_name"] for a in data["agents"]} != {
+        "alice_analyst",
+        "bob_builder",
+        "cara_community",
+        "dan_devil",
+        "eve_empath",
+    }
 
 
 def test_llm_action_interactions_include_reactions(results_dir: Path):
