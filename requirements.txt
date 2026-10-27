@@ -1,0 +1,23 @@
+# EC-Simulation Phase 1 — pinned for camel-oasis 0.2.5 compatibility
+# Python >=3.10,<3.12 (OASIS requirement)
+
+# Core OASIS / CAMEL stack (already in .venv; pins documented for reproducibility)
+camel-oasis==0.2.5
+camel-ai==0.2.78
+# CRITICAL: camel.toolkits.base expects FastMCP (mcp 1.x). mcp 2.x breaks `import oasis`.
+# Verified working with camel-oasis 0.2.5 / camel-ai 0.2.78:
+mcp==1.30.0
+
+# App
+flask>=3.0,<4
+flask-cors>=4.0,<6
+flask-socketio>=5.3,<6
+python-dotenv>=1.0,<3
+openai>=1.40,<2
+
+# Tests (also pulled by camel-oasis)
+pytest==8.2.0
+pytest-asyncio==0.23.6
+
+# Zep is optional — not installed by default. Stub lives in backend/zep/.
+# To enable later: pip install zep-cloud>=3.0
