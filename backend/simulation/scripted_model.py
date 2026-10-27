@@ -30,6 +30,24 @@ from pydantic import BaseModel
 
 
 _POST_ID_RE = re.compile(r'"post_id"\s*:\s*(\d+)')
+_POST_HASH_RE = re.compile(r"Post#(\d+)", re.IGNORECASE)
+
+
+def _extract_post_ids(blob: str) -> list[int]:
+    """Collect post ids from OASIS JSON and our FEED-KONTEXT ``Post#N`` lines."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    for match in _POST_ID_RE.findall(blob):
+        pid = int(match)
+        if pid not in seen:
+            seen.add(pid)
+            ids.append(pid)
+    for match in _POST_HASH_RE.findall(blob):
+        pid = int(match)
+        if pid not in seen:
+            seen.add(pid)
+            ids.append(pid)
+    return ids
 
 
 class ScriptedReactiveModel(BaseModelBackend):
@@ -57,10 +75,11 @@ class ScriptedReactiveModel(BaseModelBackend):
 
     def _decide(self, messages: List[Dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         blob = " ".join(str(m.get("content") or "") for m in messages)
-        ids = [int(x) for x in _POST_ID_RE.findall(blob)]
+        ids = _extract_post_ids(blob)
         self.call_count += 1
         n = self.call_count
         # Rotate actions so multi-agent runs produce varied real platform interactions.
+        # Prefer comment/like/dislike when feed ids are visible (Phase 3.5).
         # Reply = create_comment on an observed post (OASIS has no separate reply type).
         if not ids:
             return (
