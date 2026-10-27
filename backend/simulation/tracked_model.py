@@ -11,6 +11,14 @@ from pydantic import BaseModel
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.prompt_debug import PromptDebugBuffer
 
+# CAMEL BaseModelBackend.token_limit reads model_config_dict["max_tokens"].
+# That key is the OpenAI *completion* cap (MAX_TOKENS_PER_CALL=500), not the
+# chat context window. Phase-3.5 system prompts exceed 500 tokens, so ChatAgent
+# get_context() raises and astep terminates with max_tokens_exceeded — zero API
+# calls, empty tool_calls, decision_log still ok. Keep completion max_tokens in
+# config; expose a real context window here for memory/context creators.
+DEFAULT_CONTEXT_TOKEN_LIMIT = 128_000
+
 
 def _usage_from_response(response: Any) -> tuple[int, int]:
     usage = getattr(response, "usage", None)
@@ -19,6 +27,15 @@ def _usage_from_response(response: Any) -> tuple[int, int]:
     prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
     completion = int(getattr(usage, "completion_tokens", 0) or 0)
     return prompt, completion
+
+
+def resolve_context_token_limit(model: BaseModelBackend) -> int:
+    """Context window for ChatAgent memory — never the completion max_tokens."""
+    mt = getattr(model, "model_type", None)
+    native = getattr(mt, "token_limit", None) if mt is not None else None
+    if isinstance(native, int) and native >= 4096:
+        return int(native)
+    return DEFAULT_CONTEXT_TOKEN_LIMIT
 
 
 class TrackedModelBackend(BaseModelBackend):
@@ -32,6 +49,7 @@ class TrackedModelBackend(BaseModelBackend):
         agent_id: int | None = None,
         source: str = "llm_api",
         prompt_debug: PromptDebugBuffer | None = None,
+        context_token_limit: int | None = None,
     ) -> None:
         # Mirror inner config so CAMEL tooling sees a normal backend.
         super().__init__(
@@ -49,6 +67,11 @@ class TrackedModelBackend(BaseModelBackend):
         self._agent_id = agent_id
         self._source = source
         self._prompt_debug = prompt_debug
+        self._context_token_limit = int(
+            context_token_limit
+            if context_token_limit is not None
+            else resolve_context_token_limit(inner)
+        )
 
     def _capture_prompts(self, messages: List[Dict[str, Any]]) -> None:
         if self._prompt_debug is None:
@@ -57,9 +80,15 @@ class TrackedModelBackend(BaseModelBackend):
         self._prompt_debug.record(
             messages, agent_id=self._agent_id, source=self._source
         )
+
     @property
     def token_counter(self):
         return self._inner.token_counter
+
+    @property
+    def token_limit(self) -> int:
+        """Chat context budget — independent of completion max_tokens."""
+        return self._context_token_limit
 
     def _record_ok(self, response: Any) -> None:
         prompt, completion = _usage_from_response(response)

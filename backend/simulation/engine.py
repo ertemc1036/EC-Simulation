@@ -55,8 +55,31 @@ from backend.simulation.prompts import (
     model_calls_required_per_round,
     normalize_language,
 )
-from backend.simulation.tracked_model import TrackedModelBackend
+from backend.simulation.tracked_model import (
+    DEFAULT_CONTEXT_TOKEN_LIMIT,
+    TrackedModelBackend,
+    resolve_context_token_limit,
+)
 from backend.zep.client import ZepMemoryStub
+
+
+def _unwrap_model_backend(model: Any) -> Any:
+    """CAMEL wraps single backends in ModelManager — unwrap for token_limit."""
+    if model is None:
+        return None
+    models = getattr(model, "models", None)
+    if models:
+        return models[0]
+    return model
+
+
+def _context_limit_for_agent_model(model: Any) -> int:
+    inner = _unwrap_model_backend(model)
+    if isinstance(inner, TrackedModelBackend):
+        return int(inner.token_limit)
+    if inner is not None:
+        return resolve_context_token_limit(inner)
+    return DEFAULT_CONTEXT_TOKEN_LIMIT
 
 # Explicit OASIS Reddit interaction set for Phase-3.5 LLMAction runs.
 # Reply = CREATE_COMMENT on an observed post (no separate reply ActionType).
@@ -497,6 +520,18 @@ class SimulationEngine:
             await env.close()
 
         self._sync_cost_to_state()
+        # LLM mode with zero model calls is never a success (seed ≠ LLM work).
+        # Wins over earlier soft-fail flags so stop_reason stays explicit.
+        if mode == "llm" and self._tracker is not None and self._tracker.call_count == 0:
+            self._failed = True
+            with self._lock:
+                self.state.stop_reason = "llm_zero_model_calls"
+                self.state.error = (
+                    "LLM-Lauf ohne Modellaufrufe (0 API-Calls/Tokens). "
+                    "Seed-Post allein ist kein Erfolg."
+                )
+                self.state.message = self.state.error
+
         # limit_reached only if we aborted before finishing planned rounds.
         # Exhausting the call budget on the final round still counts as completed.
         rounds_finished = self.state.step >= self.state.max_steps
@@ -575,9 +610,25 @@ class SimulationEngine:
         )
 
     def _apply_memory_window(self, agent: SocialAgent) -> None:
-        """Limit chat history each agent carries into the next LLM step."""
+        """Limit chat history each agent carries into the next LLM step.
+
+        Rebuild ScoreBasedContextCreator from the wrapped model's context
+        window — never reuse a creator that baked completion max_tokens (500)
+        in as the chat token_limit.
+        """
+        from camel.memories.context_creators.score_based import (
+            ScoreBasedContextCreator,
+        )
+
         window = max(1, self.cfg.agent_memory_window)
-        creator = agent.memory.get_context_creator()
+        model = getattr(agent, "model_backend", None) or getattr(agent, "model", None)
+        token_counter = (
+            model.token_counter
+            if model is not None
+            else agent.memory.get_context_creator().token_counter
+        )
+        context_limit = _context_limit_for_agent_model(model)
+        creator = ScoreBasedContextCreator(token_counter, context_limit)
         agent.memory = ChatHistoryMemory(
             context_creator=creator,
             window_size=window,
@@ -635,6 +686,15 @@ class SimulationEngine:
                 response = await agent.astep(user_msg)
                 tool_calls = []
                 info = getattr(response, "info", None) or {}
+                terminated = bool(getattr(response, "terminated", False))
+                termination_reasons = list(
+                    info.get("termination_reasons") or []
+                )
+                # CAMEL returns terminated+max_tokens_exceeded without calling
+                # the model when system prompt > context token_limit.
+                context_blocked = terminated and any(
+                    "max_tokens" in str(r).lower() for r in termination_reasons
+                )
                 for tool_call in info.get("tool_calls") or []:
                     action_name = getattr(tool_call, "tool_name", None) or getattr(
                         tool_call, "name", None
@@ -663,17 +723,33 @@ class SimulationEngine:
                         goal=profile.goal,
                     )
                 evidence = engine._prompt_debug.last_for_agent(profile.agent_id)
+                decision_ok = not context_blocked
+                note = (
+                    "scenario+goal+language+feed+memory injected; "
+                    "OASIS default decision prompt bypassed"
+                )
+                if context_blocked:
+                    note = (
+                        "astep terminated before model call "
+                        f"(reasons={termination_reasons}); "
+                        "context token_limit vs completion max_tokens mismatch"
+                    )
+                    engine._failed = True
                 engine._append_decision_log(
                     {
                         **decision_base,
                         "step": engine.state.step + 1,
-                        "ok": True,
+                        "ok": decision_ok,
                         "tool_calls": tool_calls,
+                        "terminated": terminated,
+                        "termination_reasons": termination_reasons,
                         "prompt_bundle_id": PROMPT_BUNDLE_ID,
                         "prompt_evidence": evidence.to_dict() if evidence else None,
-                        "note": (
-                            "scenario+goal+language+feed+memory injected; "
-                            "OASIS default decision prompt bypassed"
+                        "note": note,
+                        **(
+                            {"error": "max_tokens_exceeded_before_model_call"}
+                            if context_blocked
+                            else {}
                         ),
                     }
                 )
