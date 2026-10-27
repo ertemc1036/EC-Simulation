@@ -19,6 +19,11 @@ from backend.simulation.prompt_debug import PromptDebugBuffer
 # config; expose a real context window here for memory/context creators.
 DEFAULT_CONTEXT_TOKEN_LIMIT = 128_000
 
+# Inflate prompt estimates so parallel/serial pre-reservations stay under the
+# run ceiling even when char-heuristics or counters run a bit low.
+_PROMPT_ESTIMATE_MARGIN = 1.25
+_PROMPT_ESTIMATE_PAD = 32
+
 
 def _usage_from_response(response: Any) -> tuple[int, int]:
     usage = getattr(response, "usage", None)
@@ -90,17 +95,6 @@ class TrackedModelBackend(BaseModelBackend):
         """Chat context budget — independent of completion max_tokens."""
         return self._context_token_limit
 
-    def _record_ok(self, response: Any) -> None:
-        prompt, completion = _usage_from_response(response)
-        self._tracker.record(
-            agent_id=self._agent_id,
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            model=str(self.model_type),
-            ok=True,
-            source=self._source,
-        )
-
     def _record_error(self, exc: BaseException) -> None:
         if isinstance(exc, LimitExceeded):
             return
@@ -115,7 +109,15 @@ class TrackedModelBackend(BaseModelBackend):
         )
 
     def _estimate_prompt_tokens(self, messages: List[Dict[str, Any]]) -> int:
-        """Rough char-based prompt estimate; CostTracker still applies full budget."""
+        """Conservative prompt estimate for pre-call reservation."""
+        counted: int | None = None
+        try:
+            counter = self.token_counter
+            if counter is not None and hasattr(counter, "count_tokens_from_messages"):
+                counted = int(counter.count_tokens_from_messages(messages))
+        except Exception:
+            counted = None
+
         total_chars = 0
         for msg in messages:
             content = msg.get("content")
@@ -123,14 +125,16 @@ class TrackedModelBackend(BaseModelBackend):
                 total_chars += len(content)
             elif content is not None:
                 total_chars += len(str(content))
-        # ~4 chars/token heuristic, never below 1.
-        return max(1, total_chars // 4)
+        # denser than //4 — German Phase-3.5 prompts under-counted at //4
+        heuristic = max(1, total_chars // 3)
+        base = max(counted or 0, heuristic)
+        return max(1, int(base * _PROMPT_ESTIMATE_MARGIN) + _PROMPT_ESTIMATE_PAD)
 
-    def _preflight(self, messages: List[Dict[str, Any]]) -> None:
-        # Conservative gate: full completion budget + estimated/floor prompt.
+    def _reserve(self, messages: List[Dict[str, Any]]) -> int:
+        # Full completion budget + conservative prompt — atomic with peers.
         est_prompt = self._estimate_prompt_tokens(messages)
         est_completion = max(1, int(self._tracker.max_tokens_per_call))
-        self._tracker.check_can_call(
+        return self._tracker.reserve_call(
             estimated_prompt_tokens=est_prompt,
             estimated_completion_tokens=est_completion,
             conservative=True,
@@ -142,20 +146,24 @@ class TrackedModelBackend(BaseModelBackend):
         response_format: Optional[Type[BaseModel]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, Stream[ChatCompletionChunk]]:
-        self._preflight(messages)
+        reservation_id = self._reserve(messages)
         self._capture_prompts(messages)
         try:
             response = self._inner._run(messages, response_format, tools)
         except Exception as exc:
+            self._tracker.release_reservation(reservation_id)
             self._record_error(exc)
             raise
-        self._record_ok(response)
-        # Post-call token ceiling (blocks subsequent calls)
-        if self._tracker.total_tokens >= self._tracker.max_tokens:
-            self._tracker.limit_hit = (
-                f"Token-Limit erreicht "
-                f"(MAX_TOKENS_PER_RUN={self._tracker.max_tokens})."
-            )
+        prompt, completion = _usage_from_response(response)
+        self._tracker.commit_reservation(
+            reservation_id,
+            agent_id=self._agent_id,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            model=str(self.model_type),
+            ok=True,
+            source=self._source,
+        )
         return response
 
     async def _arun(
@@ -164,17 +172,22 @@ class TrackedModelBackend(BaseModelBackend):
         response_format: Optional[Type[BaseModel]] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]:
-        self._preflight(messages)
+        reservation_id = self._reserve(messages)
         self._capture_prompts(messages)
         try:
             response = await self._inner._arun(messages, response_format, tools)
         except Exception as exc:
+            self._tracker.release_reservation(reservation_id)
             self._record_error(exc)
             raise
-        self._record_ok(response)
-        if self._tracker.total_tokens >= self._tracker.max_tokens:
-            self._tracker.limit_hit = (
-                f"Token-Limit erreicht "
-                f"(MAX_TOKENS_PER_RUN={self._tracker.max_tokens})."
-            )
+        prompt, completion = _usage_from_response(response)
+        self._tracker.commit_reservation(
+            reservation_id,
+            agent_id=self._agent_id,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            model=str(self.model_type),
+            ok=True,
+            source=self._source,
+        )
         return response
