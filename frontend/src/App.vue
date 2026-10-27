@@ -48,20 +48,33 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-4) misses interaction / oasis_reply fields. */
+/** Stale Flask on :5001 (pre-Phase-4.1) misses interaction / oasis_reply fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
+  const phaseOk = phase === '4' || phase === '4.1' || phase.startsWith('4')
   const hasRevision = Boolean(h.runtime?.code_revision)
   const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
   const hasOasisReply = Boolean(h.config?.oasis_reply)
-  if (phase === '4' && hasRevision && hasGenModes && hasOasisReply) return null
+  if (phaseOk && hasRevision && hasGenModes && hasOasisReply) return null
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 4 oder fehlende Phase-4-Felder). ' +
+      'Backend wirkt veraltet (Phase ≠ 4.1 oder fehlende Phase-4-Felder). ' +
       'Flask auf Port 5001 neu starten, sonst fehlen Interaktionsgraph / oasis_reply.',
+  }
+})
+
+/** Explicit stop reason for limit_reached / failed — always visible when set. */
+const stopReasonDisplay = computed(() => {
+  const s = sim.value
+  if (!s?.stop_reason) return null
+  const isLimit = s.status === 'limit_reached' || Boolean(s.cost_summary?.limit_hit)
+  return {
+    reason: s.stop_reason,
+    limitHit: s.cost_summary?.limit_hit || null,
+    isLimit,
   }
 })
 
@@ -377,7 +390,20 @@ onUnmounted(() => {
         <span class="v mono">{{ sim.run_id }}</span>
       </div>
       <p class="msg">{{ sim.message }}</p>
-      <p v-if="sim.stop_reason" class="msg muted">Stop: {{ sim.stop_reason }}</p>
+      <div
+        v-if="stopReasonDisplay"
+        class="stop-reason"
+        :class="stopReasonDisplay.isLimit ? 'stop-limit' : 'stop-other'"
+      >
+        <span class="k">Stop-Grund</span>
+        <span class="v">{{ stopReasonDisplay.reason }}</span>
+        <p
+          v-if="stopReasonDisplay.limitHit && stopReasonDisplay.limitHit !== stopReasonDisplay.reason"
+          class="msg muted"
+        >
+          Limit-Detail: {{ stopReasonDisplay.limitHit }}
+        </p>
+      </div>
       <p v-if="sim.error" class="err">{{ sim.error }}</p>
     </section>
 
@@ -405,8 +431,8 @@ onUnmounted(() => {
           </span>
         </div>
         <div>
-          <span class="k">Limit</span>
-          <span class="v">{{ sim.cost_summary?.limit_hit || '—' }}</span>
+          <span class="k">Stop-Grund</span>
+          <span class="v">{{ sim.stop_reason || sim.cost_summary?.limit_hit || '—' }}</span>
         </div>
       </div>
       <ol class="log calls" v-if="sim.model_calls?.length">
@@ -841,6 +867,26 @@ input {
   grid-column: 1 / -1;
   margin: 0.2rem 0 0;
   color: var(--muted);
+}
+
+.stop-reason {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid var(--muted);
+  background: color-mix(in srgb, var(--panel, #1a1f2a) 92%, transparent);
+}
+.stop-reason.stop-limit {
+  border-left-color: var(--warn, #e0b35a);
+}
+.stop-reason.stop-other {
+  border-left-color: var(--danger, #e07a7a);
+}
+.stop-reason .v {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.95rem;
+  line-height: 1.35;
 }
 
 .status-ok {

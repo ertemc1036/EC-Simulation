@@ -128,6 +128,7 @@ def _build_interaction_summary(
 # and no separate reply ActionType (see oasis_reply.py).
 # SEARCH_POSTS / REFRESH removed: OASIS already refreshes inside to_text_prompt,
 # and those tools produced empty interaction (no comments/reactions) in live runs.
+# FOLLOW removed in Phase 4.1 (tool-schema cost without debate value).
 # comment / like / dislike stay available without quotas.
 LLM_INTERACTION_ACTIONS = [
     ActionType.CREATE_POST,
@@ -137,7 +138,6 @@ LLM_INTERACTION_ACTIONS = [
     ActionType.LIKE_COMMENT,
     ActionType.DISLIKE_COMMENT,
     ActionType.DO_NOTHING,
-    ActionType.FOLLOW,
 ]
 
 
@@ -723,15 +723,29 @@ class SimulationEngine:
         engine = self
 
         async def perform_action_by_llm_bound():
+            # Phase 4.1: reset chat to system-only before each decision so the
+            # previous round's long user/tool transcript is not re-sent (~2k→4k).
+            # Local memory + FEED-KONTEXT already carry actions / IDs.
+            try:
+                agent.init_messages()
+            except Exception:
+                mem = getattr(agent, "memory", None)
+                if mem is not None and hasattr(mem, "clear"):
+                    mem.clear()
+
             env_prompt = await agent.env.to_text_prompt()
-            # Engine-owned feed + memory (traceable) — OASIS env buries posts
+            # Engine-owned prioritized feed + memory — OASIS env buries posts
             # after empty group-chat noise and ends with like-bait.
             with engine._lock:
                 posts_snap = list(engine.state.posts)
                 comments_snap = list(engine.state.comments)
-            feed_context = format_feed_context(posts_snap, comments_snap)
+            feed_context = format_feed_context(
+                posts_snap,
+                comments_snap,
+                viewer_id=profile.agent_id,
+            )
             memory_entries = engine._local_memory.recent_for_prompt(
-                profile.agent_id, limit=6
+                profile.agent_id, limit=3
             )
             memory_context = format_memory_context(memory_entries)
             user_content = build_decision_prompt(
@@ -874,10 +888,9 @@ class SimulationEngine:
                 user_info=UserInfo(
                     user_name=profile.user_name,
                     name=profile.name,
-                    description=(
-                        f"{profile.description} Ziel: {profile.goal}. "
-                        f"Stil: {profile.style}."
-                    ),
+                    # Persona/goal/style live in SYSTEM_PROMPT_TEMPLATE via
+                    # profile_dict — avoid duplicating them in description.
+                    description=profile.style[:80],
                     profile=profile_dict,
                     recsys_type="reddit",
                 ),
@@ -1287,7 +1300,7 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 4,
+                "phase": 4.1,
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
                 "agent_memory_window": self.cfg.agent_memory_window,
@@ -1303,6 +1316,15 @@ class SimulationEngine:
                 "custom_prompts_active": custom_active,
                 "custom_prompts_verified_at_build": self._custom_prompts_verified,
                 "prompt_debug": prompt_summary,
+                "token_optimization": {
+                    "chat_history_reset_per_decision": True,
+                    "prioritized_feed_memory": True,
+                    "ids_retained": True,
+                    "oasis_env_omitted_when_feed_present": True,
+                    "follow_tool_removed": True,
+                    "approval_gate": True,
+                    "atomic_reserve": True,
+                },
             },
             "agents": self.state.agents,
             "posts": self.state.posts,

@@ -57,7 +57,11 @@ def test_system_prompt_embeds_scenario_goal_language_no_twitter_objective():
     assert "You're a Twitter user" not in prompt
     assert "I'll present you with some tweets" not in prompt
     # Explicit anti-bait (root-cause fix, not post-filter).
-    assert "Like-Ketten" in prompt or "Likes-zum-Liken" in prompt
+    assert (
+        "Like-Ketten" in prompt
+        or "Likes-zum-Liken" in prompt
+        or "Tweet-/Like-Spam" in prompt
+    )
     assert "Twitter" in prompt  # warned against
 
 
