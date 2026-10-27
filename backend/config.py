@@ -15,6 +15,9 @@ LIVE_TEST_MAX_AGENTS = 5
 LIVE_TEST_MAX_ROUNDS = 2
 LIVE_TEST_MAX_LLM_CALLS = 10
 LIVE_TEST_MAX_RETRIES = 0
+# Concurrent in-flight LLM calls inside one round (OASIS gather + semaphore).
+# Default 1: serialize model calls so token reservations cannot race.
+LIVE_TEST_MAX_PARALLEL_LLM_CALLS = 1
 
 COST_ESTIMATE_DISCLAIMER = (
     "Kostenschätzung auf Basis der konfigurierten USD/1M-Preise; "
@@ -65,6 +68,7 @@ class Settings:
     max_tokens_per_call: int
     max_tokens_per_run: int
     max_cost_usd_per_run: float
+    max_parallel_llm_calls: int
     llm_max_retries: int
     agent_memory_window: int
     agent_local_memory_entries: int
@@ -145,6 +149,7 @@ class Settings:
             "max_tokens_per_call": self.max_tokens_per_call,
             "max_tokens_per_run": self.max_tokens_per_run,
             "max_cost_usd_per_run": self.max_cost_usd_per_run,
+            "max_parallel_llm_calls": self.max_parallel_llm_calls,
             "estimated_max_cost_usd": self.estimate_max_run_cost_usd(),
             "cost_estimate_disclaimer": COST_ESTIMATE_DISCLAIMER,
             "llm_max_retries": self.llm_max_retries,
@@ -164,6 +169,7 @@ class Settings:
                 "max_rounds": LIVE_TEST_MAX_ROUNDS,
                 "max_model_calls": LIVE_TEST_MAX_LLM_CALLS,
                 "max_retries": LIVE_TEST_MAX_RETRIES,
+                "max_parallel_llm_calls": LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
             },
             "terminal_statuses": ["completed", "limit_reached", "failed"],
             "zep_enabled": self.zep_enabled,
@@ -201,6 +207,12 @@ def load_settings() -> Settings:
         max(0, _int("LLM_MAX_RETRIES", LIVE_TEST_MAX_RETRIES)),
         LIVE_TEST_MAX_RETRIES,
     )
+    # Parallel LLM calls: env may lower further; never above live-test ceiling.
+    max_parallel = min(
+        max(1, _int("MAX_PARALLEL_LLM_CALLS", LIVE_TEST_MAX_PARALLEL_LLM_CALLS)),
+        LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+        LIVE_TEST_MAX_AGENTS,
+    )
     # Default German — live run showed English drift from OASIS defaults.
     sim_lang = _normalize_sim_language(os.getenv("SIMULATION_LANGUAGE", "de"))
 
@@ -213,6 +225,7 @@ def load_settings() -> Settings:
         max_tokens_per_call=max(1, _int("MAX_TOKENS_PER_CALL", 500)),
         max_tokens_per_run=max(1, _int("MAX_TOKENS_PER_RUN", 20000)),
         max_cost_usd_per_run=_float("MAX_COST_USD_PER_RUN", 0.20),
+        max_parallel_llm_calls=max_parallel,
         llm_max_retries=max_retries,
         agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
         agent_local_memory_entries=max(1, _int("AGENT_LOCAL_MEMORY_ENTRIES", 12)),

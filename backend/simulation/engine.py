@@ -30,6 +30,7 @@ from oasis import (
 from backend.config import (
     LIVE_TEST_MAX_AGENTS,
     LIVE_TEST_MAX_LLM_CALLS,
+    LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
     LIVE_TEST_MAX_ROUNDS,
     Settings,
     settings as default_settings,
@@ -233,6 +234,10 @@ class SimulationEngine:
             max_cost_usd=self.cfg.max_cost_usd_per_run,
             model_name=self.cfg.openai_model,
             max_tokens_per_call=self.cfg.max_tokens_per_call,
+            max_parallel_calls=min(
+                self.cfg.max_parallel_llm_calls,
+                LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+            ),
         )
 
     def _is_busy(self) -> bool:
@@ -491,10 +496,21 @@ class SimulationEngine:
         os.environ["OASIS_DB_PATH"] = str(db_path)
 
         graph = self._build_agent_graph(mode, scenario=scenario, language=language)
+        # OASIS defaults semaphore=128 (all agents race). Cap to live-test
+        # parallel ceiling so model calls serialize with token reservations.
+        parallel = max(
+            1,
+            min(
+                self.cfg.max_parallel_llm_calls,
+                LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+                LIVE_TEST_MAX_AGENTS,
+            ),
+        )
         env = oasis.make(
             agent_graph=graph,
             platform=DefaultPlatformType.REDDIT,
             database_path=str(db_path),
+            semaphore=parallel,
         )
 
         self.zep.maybe_remember_session(
@@ -532,17 +548,28 @@ class SimulationEngine:
                 )
                 self.state.message = self.state.error
 
-        # limit_reached only if we aborted before finishing planned rounds.
-        # Exhausting the call budget on the final round still counts as completed.
+        # Token overshoot is never a successful completed run (false completed).
+        # Call-budget emptying on the final round without overshoot stays completed.
         rounds_finished = self.state.step >= self.state.max_steps
+        token_exceeded = bool(self._tracker and self._tracker.tokens_exceeded)
         early_limit_stop = bool(
             (self._limit_stop or (self._tracker and self._tracker.limit_hit))
             and not rounds_finished
+            and not token_exceeded
         )
         if self._failed:
             status = STATUS_FAILED
             stop_reason = self.state.stop_reason or "llm_error"
             msg_prefix = self.state.message or "Simulation fehlgeschlagen."
+        elif token_exceeded:
+            status = STATUS_LIMIT_REACHED
+            stop_reason = (
+                (self._tracker.limit_hit if self._tracker else None)
+                or "token_budget_exceeded"
+            )
+            msg_prefix = (
+                f"Token-Budget überschritten ({self.state.mode}). {stop_reason}"
+            )
         elif early_limit_stop:
             status = STATUS_LIMIT_REACHED
             stop_reason = (
