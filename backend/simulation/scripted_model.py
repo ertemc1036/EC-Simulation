@@ -31,6 +31,9 @@ from pydantic import BaseModel
 
 _POST_ID_RE = re.compile(r'"post_id"\s*:\s*(\d+)')
 _POST_HASH_RE = re.compile(r"Post#(\d+)", re.IGNORECASE)
+_COMMENT_HASH_RE = re.compile(r"Kommentar#(\d+)", re.IGNORECASE)
+_COMMENT_ID_RE = re.compile(r'"comment_id"\s*:\s*(\d+)')
+_COMMENT_ID_HINT_RE = re.compile(r"comment_id\s*=\s*(\d+)", re.IGNORECASE)
 
 
 def _extract_post_ids(blob: str) -> list[int]:
@@ -47,6 +50,19 @@ def _extract_post_ids(blob: str) -> list[int]:
         if pid not in seen:
             seen.add(pid)
             ids.append(pid)
+    return ids
+
+
+def _extract_comment_ids(blob: str) -> list[int]:
+    """Collect comment ids from FEED-KONTEXT / JSON for like_comment tools."""
+    ids: list[int] = []
+    seen: set[int] = set()
+    for pattern in (_COMMENT_ID_RE, _COMMENT_HASH_RE, _COMMENT_ID_HINT_RE):
+        for match in pattern.findall(blob):
+            cid = int(match)
+            if cid not in seen:
+                seen.add(cid)
+                ids.append(cid)
     return ids
 
 
@@ -76,11 +92,12 @@ class ScriptedReactiveModel(BaseModelBackend):
     def _decide(self, messages: List[Dict[str, Any]]) -> tuple[str, dict[str, Any]]:
         blob = " ".join(str(m.get("content") or "") for m in messages)
         ids = _extract_post_ids(blob)
+        comment_ids = _extract_comment_ids(blob)
         self.call_count += 1
         n = self.call_count
         # Rotate actions so multi-agent runs produce varied real platform interactions.
-        # Prefer comment/like/dislike when feed ids are visible (Phase 3.5).
-        # Reply = create_comment on an observed post (OASIS has no separate reply type).
+        # Prefer comment/like/dislike when feed ids are visible (Phase 3.5 / 4).
+        # Reply = create_comment on an observed post (OASIS has no parent_comment_id).
         if not ids:
             return (
                 "create_post",
@@ -92,7 +109,7 @@ class ScriptedReactiveModel(BaseModelBackend):
                 },
             )
         target = ids[min(self.agent_id % len(ids), len(ids) - 1)]
-        kind = (n + self.agent_id) % 4
+        kind = (n + self.agent_id) % 5
         if kind == 0:
             return (
                 "create_comment",
@@ -100,7 +117,7 @@ class ScriptedReactiveModel(BaseModelBackend):
                     "post_id": target,
                     "content": (
                         f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
-                        f"auf Post {target}."
+                        f"auf Post {target} (kein parent_comment_id)."
                     ),
                 },
             )
@@ -108,6 +125,12 @@ class ScriptedReactiveModel(BaseModelBackend):
             return ("like_post", {"post_id": target})
         if kind == 2:
             return ("dislike_post", {"post_id": target})
+        if kind == 3 and comment_ids:
+            cid = comment_ids[min(self.agent_id % len(comment_ids), len(comment_ids) - 1)]
+            # Alternate agree / disagree on comments when visible.
+            if (n + self.agent_id) % 2 == 0:
+                return ("like_comment", {"comment_id": cid})
+            return ("dislike_comment", {"comment_id": cid})
         return (
             "create_post",
             {

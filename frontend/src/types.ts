@@ -73,6 +73,11 @@ export interface KnowledgeGraph {
   edge_count?: number
   counts_by_kind?: Record<string, number>
   counts_by_relation?: Record<string, number>
+  interaction_relations?: {
+    replied_to?: number
+    agrees_with?: number
+    disagrees_with?: number
+  }
   nodes?: Array<{
     id: string
     kind: string
@@ -87,6 +92,24 @@ export interface KnowledgeGraph {
     meta?: Record<string, unknown>
   }>
   note?: string
+}
+
+export interface InteractionSummary {
+  replied_to?: number
+  agrees_with?: number
+  disagrees_with?: number
+  comments?: number
+  post_reactions?: number
+  comment_reactions?: number
+  note?: string
+}
+
+export interface OasisReplyInfo {
+  parent_comment_id_supported?: boolean
+  separate_reply_action_type?: boolean
+  reply_via?: string
+  documented_alternative?: string
+  graph_relations_evidenced_only?: string[]
 }
 
 export interface AgentMemorySnapshot {
@@ -124,6 +147,8 @@ export interface SimulationState {
   cost_summary: CostSummary
   agent_memory?: AgentMemorySnapshot
   knowledge_graph?: KnowledgeGraph
+  interaction_summary?: InteractionSummary
+  oasis_reply?: OasisReplyInfo
   error: string | null
   result_path: string | null
   db_path: string | null
@@ -172,6 +197,7 @@ export interface HealthResponse {
     zep_integrated?: boolean
     knowledge_graph_backend?: string
     phase?: string
+    oasis_reply?: OasisReplyInfo
     api_key_exposed?: boolean
   }
   runtime?: {

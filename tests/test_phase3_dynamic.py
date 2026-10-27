@@ -134,14 +134,14 @@ def test_dynamic_count_three(results_dir: Path):
     assert state["knowledge_graph"]["edge_count"] >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 3
+    assert data["meta"]["phase"] == 4
     assert data["meta"]["zep_integrated"] is False
     assert "agent_memory" in data
     assert "knowledge_graph" in data
 
 
 def test_berlin_manual_memory_and_kg(results_dir: Path):
-    """Offline regression: Berlin Autoverbot → dynamic roles, phase=3, Memory+KG filled."""
+    """Offline regression: Berlin Autoverbot → dynamic roles, phase=4, Memory+KG filled."""
     cfg = load_settings()
     engine = SimulationEngine(cfg)
     result = engine.start(
@@ -169,7 +169,7 @@ def test_berlin_manual_memory_and_kg(results_dir: Path):
     assert kg.get("edge_count", 0) >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 3
+    assert data["meta"]["phase"] == 4
     assert data["meta"]["agent_generation"] == "dynamic"
     assert data["agent_memory"]["agent_count_with_memory"] >= 1
     assert data["knowledge_graph"]["node_count"] >= 5
@@ -258,5 +258,9 @@ def test_knowledge_graph_relations():
     rels = data["counts_by_relation"]
     assert rels.get("posted", 0) >= 2
     assert rels.get("commented", 0) >= 1
-    assert rels.get("liked", 0) >= 1
+    # Phase 4: evidenced interaction edges (like → agrees_with; comment → replied_to)
+    assert rels.get("agrees_with", 0) >= 1
+    assert rels.get("replied_to", 0) >= 1
     assert rels.get("replies_to", 0) >= 1
+    assert data["interaction_relations"]["agrees_with"] >= 1
+    assert data["interaction_relations"]["replied_to"] >= 1

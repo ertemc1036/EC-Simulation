@@ -39,7 +39,9 @@ def results_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("RESULTS_DIR", str(out))
     monkeypatch.setenv("MAX_SIMULATION_STEPS", "2")
     monkeypatch.setenv("MAX_LLM_CALLS_PER_RUN", "10")
-    monkeypatch.setenv("MAX_TOKENS_PER_RUN", "5000")
+    # Phase-4 prompts are larger (feed/interaction context); keep under live
+    # ceiling but high enough that ScriptedModel offline runs finish 5×2.
+    monkeypatch.setenv("MAX_TOKENS_PER_RUN", "20000")
     monkeypatch.setenv("AGENT_MEMORY_WINDOW", "6")
     monkeypatch.setenv("AGENT_LOCAL_MEMORY_ENTRIES", "8")
     return out
