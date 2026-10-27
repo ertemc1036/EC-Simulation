@@ -67,6 +67,7 @@ def test_llm_actions_include_comment_reactions_without_quotas():
     assert ActionType.DISLIKE_POST in LLM_INTERACTION_ACTIONS
     assert ActionType.SEARCH_POSTS not in LLM_INTERACTION_ACTIONS
     assert ActionType.REFRESH not in LLM_INTERACTION_ACTIONS
+    assert ActionType.FOLLOW not in LLM_INTERACTION_ACTIONS
     # No per-action quotas — allow-list membership only.
     assert len(LLM_INTERACTION_ACTIONS) == len(set(LLM_INTERACTION_ACTIONS))
 
@@ -222,7 +223,11 @@ def test_scripted_llm_run_phase4_interactions(results_dir: Path):
     assert state["agent_memory"]["agent_count_with_memory"] >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 4
+    assert data["meta"]["phase"] == 4.1
+    assert data["meta"]["token_optimization"]["chat_history_reset_per_decision"] is True
+    assert data["meta"]["token_optimization"]["ids_retained"] is True
+    assert data["meta"]["token_optimization"]["atomic_reserve"] is True
+    assert data["meta"]["token_optimization"]["approval_gate"] is True
     assert data["meta"]["prompt_bundle_id"] == PROMPT_BUNDLE_ID
     assert data["meta"]["oasis_reply"]["parent_comment_id_supported"] is False
     assert data["meta"]["zep_integrated"] is False
@@ -243,7 +248,7 @@ def test_budget_and_approval_regression(results_dir: Path, monkeypatch: pytest.M
     assert cfg.max_tokens_per_call == 500
     assert cfg.max_cost_usd_per_run == 0.20
     assert cfg.max_parallel_llm_calls == 1
-    assert cfg.status_payload()["phase"] == "4"
+    assert cfg.status_payload()["phase"] == "4.1"
     assert cfg.status_payload()["llm_run_requires_approval"] is True
 
     # Approval gate still blocks without llm_run_approved.

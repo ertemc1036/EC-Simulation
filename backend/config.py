@@ -179,7 +179,7 @@ class Settings:
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
-            "phase": "4",
+            "phase": "4.1",
             "oasis_reply": {
                 "parent_comment_id_supported": False,
                 "reply_via": "create_comment(post_id, content)",

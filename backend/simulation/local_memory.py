@@ -53,7 +53,7 @@ class LocalAgentMemory:
         bucket.append(
             MemoryEntry(
                 kind=kind,
-                text=text[:800],
+                text=text[:400],
                 step=step,
                 meta=meta or {},
             )
@@ -66,13 +66,31 @@ class LocalAgentMemory:
         return [e.to_dict() for e in self._by_agent.get(int(agent_id), [])]
 
     def recent_for_prompt(
-        self, agent_id: int, *, limit: int = 6
+        self, agent_id: int, *, limit: int = 3
     ) -> list[dict[str, Any]]:
-        """Last N entries for decision-prompt injection (traceable memory)."""
+        """Bounded entries for decision-prompt injection (traceable memory).
+
+        Prefer own actions over feed observations — FEED-KONTEXT already carries
+        posts/comments with IDs (Phase 4.1 redundancy cut).
+        """
         entries = self.for_agent(agent_id)
-        if limit <= 0:
+        if limit <= 0 or not entries:
             return []
-        return entries[-limit:]
+        indexed = list(enumerate(entries))
+        indexed.sort(
+            key=lambda pair: (
+                0 if (pair[1].get("kind") or "") == "action" else 1,
+                -pair[0],
+            )
+        )
+        chosen = [e for _, e in indexed[:limit]]
+        chosen.sort(
+            key=lambda e: (
+                e.get("step") is None,
+                e.get("step") if e.get("step") is not None else 0,
+            )
+        )
+        return chosen
 
     def snapshot(self) -> dict[str, Any]:
         agents = {
@@ -107,9 +125,10 @@ class LocalAgentMemory:
         if target is not None:
             bits.append(f"Ziel={target}")
         if content:
-            bits.append(f"Text: {str(content)[:240]}")
-        if goal:
-            bits.append(f"Zielrahmen: {goal}")
+            # Short snippet — full text already lives in the feed / DB.
+            bits.append(f"Text: {str(content)[:100]}")
+        # Do not re-append the full goal (already in system prompt).
+        _ = goal
         self.remember(
             agent_id,
             kind="action",
@@ -142,7 +161,7 @@ class LocalAgentMemory:
             )
         if not preview_parts:
             return
-        blob = " | ".join(preview_parts)[:700]
+        blob = " | ".join(preview_parts)[:280]
         for aid in agent_ids:
             self.remember(
                 aid,
