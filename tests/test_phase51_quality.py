@@ -280,12 +280,13 @@ def test_comment_id_author_mapping_for_influence():
             {"post_id": 2, "user_id": 1, "content": "Auch ich bin dagegen."},
         ],
         comments=[
-            {
-                "comment_id": 10,
-                "post_id": 1,
-                "user_id": 0,
-                "content": "Neue Studien zeigen Nutzen — dafür.",
-            },
+                {
+                    "comment_id": 10,
+                    "post_id": 1,
+                    "user_id": 0,
+                    # Stay contra so only agent 1's evidenced mind-change counts.
+                    "content": "Neue Studien prüfen — ich bleibe dagegen.",
+                },
             {
                 "comment_id": 11,
                 "post_id": 2,
