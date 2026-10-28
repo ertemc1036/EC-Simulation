@@ -52,9 +52,24 @@ def build_society_analytics(
         "reactions_per_agent": round(len(reactions) / max(1, agent_count), 3),
     }
 
+    stance_clarity = float(
+        opinion.get("stance_clarity")
+        if opinion.get("stance_clarity") is not None
+        else round(
+            1.0
+            - (
+                (
+                    float(pol.get("unknown") or 0)
+                    + float(pol.get("uncertain") or 0)
+                )
+                / max(1.0, float(sum(int(v) for v in pol.values()) or 1))
+            ),
+            4,
+        )
+    )
     return {
         "phase": 8,
-        "quality_fix": "8.1",
+        "quality_fix": "8.2",
         "persona_engine": "v3",
         "backend": "local",
         "execution_kind": execution_kind,
@@ -87,12 +102,17 @@ def build_society_analytics(
             "chronology_events": len(relationships.get("chronology") or []),
         },
         "opinion": {
+            "engine": opinion.get("engine") or "v2",
+            "version": opinion.get("version", 2),
             "change_count": change_count,
             "polarity_distribution": pol,
             "rounds_tracked": rounds_tracked,
             "shift_rate_per_agent_round": shift_rate,
             "transitions": opinion.get("transitions") or {},
             "chronology_len": len(opinion.get("chronology") or []),
+            "stance_clarity": stance_clarity,
+            "stability_index": opinion.get("stability_index"),
+            "polarization": opinion.get("polarization"),
         },
         "engagement": engagement,
         "social_relations": social,
@@ -123,9 +143,12 @@ def build_society_analytics(
             ),
             "opinion_volatility": shift_rate,
             "social_edge_total": sum(int(v or 0) for v in social.values()),
+            "stance_clarity": stance_clarity,
+            "opinion_stability": float(opinion.get("stability_index") or 0.0),
         },
         "note": (
-            "Society Analytics (Phase 8.1). Offline 10/25/50 × ≤4 Runden. "
-            "Live-Ceilings unverändert; paid_llm_unlocked=false; kein Zep."
+            "Society Analytics (Phase 8.2). Debate Quality + Opinion V2. "
+            "Offline 10/25/50 × ≤4 Runden. Live-Ceilings unverändert; "
+            "paid_llm_unlocked=false; kein Zep."
         ),
     }

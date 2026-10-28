@@ -1,7 +1,8 @@
-"""Phase 8.0/8.1 — Simulation Intelligence (offline foundation + scaling).
+"""Phase 8.0–8.2 — Simulation Intelligence (scaling + debate quality).
 
 Aggregates persona diversity V3, scheduler coverage/waves-in-execution,
-cost plan V3, interaction engine, and society signals. No provider calls.
+cost plan V3, interaction engine, debate quality V2, stance V2, and society
+signals. No provider calls.
 """
 from __future__ import annotations
 
@@ -19,8 +20,12 @@ from backend.config import (
 from backend.simulation.cost_token_planner import CostTokenPlan
 
 
-QUALITY_FIX = "8.1"
+QUALITY_FIX = "8.2"
 PERSONA_ENGINE = "v3"
+DEBATE_ENGINE = "v2"
+STANCE_CLASSIFIER = "v2"
+OPINION_ENGINE = "v2"
+ARGUMENT_ENGINE = "v2"
 
 
 def _unique_occupations(agents: list[dict[str, Any]]) -> int:
@@ -118,8 +123,9 @@ def build_simulation_intelligence(
     discussion: dict[str, Any] | None,
     agent_positions: dict[str, Any] | None,
     interaction_engine: dict[str, Any] | None = None,
+    opinion_dynamics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compact Phase-8.1 intelligence snapshot for status + result JSON."""
+    """Compact Phase-8.2 intelligence snapshot for status + result JSON."""
     agents = agents or []
     n = max(1, int(agent_count) or len(agents) or 1)
     issues = _persona_issues(agents)
@@ -127,10 +133,6 @@ def build_simulation_intelligence(
     occ_n = _unique_occupations(agents)
     name_n = _unique_names(agents)
     balance = _role_balance(agents)
-    # V3 diversity: blend uniqueness + balance; scales beyond the old min(n,5) cap.
-    uniq = (role_n + occ_n + name_n) / max(3.0, 3.0 * n)
-    diversity = round(min(1.0, 0.65 * uniq * n / max(1.0, n) + 0.35 * balance + 0.35 * min(1.0, role_n / max(3.0, min(n, 8)))), 4)
-    # Simpler readable score used in dashboard: occupancy of unique slots.
     diversity = round(
         min(
             1.0,
@@ -150,10 +152,15 @@ def build_simulation_intelligence(
     disc = discussion or {}
     positions = agent_positions or {}
     iex = interaction_engine or {}
+    opinion = opinion_dynamics or {}
     pol = positions.get("polarity_distribution") or {}
     unknown_share = float(pol.get("unknown") or 0) / max(
         1.0, float(sum(int(v) for v in pol.values()) or 1)
     )
+    uncertain_share = float(pol.get("uncertain") or 0) / max(
+        1.0, float(sum(int(v) for v in pol.values()) or 1)
+    )
+    unclear_share = round(unknown_share + uncertain_share, 4)
 
     scale_ready = (
         execution_kind in {"manual", "scripted"}
@@ -171,10 +178,23 @@ def build_simulation_intelligence(
         sched.get("waves_planned") or sched.get("waves") or iex.get("waves_planned") or 0
     )
 
+    arg_intel = disc.get("argument_intelligence") or {}
+    debate_q = disc.get("debate_quality") or {}
+    debate_score = float(debate_q.get("score") or 0.0)
+    stance_clarity = float(
+        opinion.get("stance_clarity")
+        if opinion.get("stance_clarity") is not None
+        else max(0.0, 1.0 - unclear_share)
+    )
+
     return {
         "phase": 8,
         "quality_fix": QUALITY_FIX,
         "persona_engine": PERSONA_ENGINE,
+        "debate_engine": disc.get("debate_engine") or DEBATE_ENGINE,
+        "stance_classifier": positions.get("stance_classifier") or STANCE_CLASSIFIER,
+        "opinion_engine": opinion.get("engine") or OPINION_ENGINE,
+        "argument_engine": arg_intel.get("engine") or ARGUMENT_ENGINE,
         "backend": "local",
         "execution_kind": execution_kind,
         "paid_llm_unlocked": False,
@@ -218,11 +238,35 @@ def build_simulation_intelligence(
             "cross_agent_replies": disc.get("cross_agent_replies", 0),
             "self_replies": disc.get("self_replies", 0),
             "quality_fix": disc.get("quality_fix") or QUALITY_FIX,
+            "debate_engine": disc.get("debate_engine") or DEBATE_ENGINE,
+            "debate_quality_score": debate_score,
+            "mean_argument_quality": arg_intel.get("mean_quality_score", 0.0),
+            "argument_diversity": arg_intel.get("argument_diversity", 0.0),
+            "claim_kinds": arg_intel.get("claim_kinds") or {},
         },
         "stance": {
+            "classifier": positions.get("stance_classifier") or STANCE_CLASSIFIER,
             "polarity_distribution": pol,
             "change_count": positions.get("change_count", 0),
             "unknown_share": round(unknown_share, 4),
+            "unclear_share": unclear_share,
+            "clarity": stance_clarity,
+            "quality_fix": positions.get("quality_fix") or QUALITY_FIX,
+        },
+        "opinion": {
+            "engine": opinion.get("engine") or OPINION_ENGINE,
+            "version": opinion.get("version", 2),
+            "stance_clarity": stance_clarity,
+            "stability_index": opinion.get("stability_index"),
+            "polarization": opinion.get("polarization"),
+            "shift_rate_per_agent_round": opinion.get("shift_rate_per_agent_round", 0.0),
+            "rounds_tracked": opinion.get("rounds_tracked", 0),
+        },
+        "debate_quality": debate_q
+        or {
+            "score": debate_score,
+            "engine": DEBATE_ENGINE,
+            "quality_fix": QUALITY_FIX,
         },
         "society_kpis": (analytics.get("kpis") or {}),
         "scale": {
@@ -248,12 +292,17 @@ def build_simulation_intelligence(
             "planned_waves": int(plan.get("planned_waves") or waves_planned or 0),
             "planned_cost_usd": float(plan.get("planned_cost_usd") or 0.0),
             "unknown_stance_share": round(unknown_share, 4),
+            "stance_clarity": stance_clarity,
             "repetition_blocks": int(disc.get("repetition_blocks") or 0),
+            "debate_quality_score": debate_score,
+            "argument_diversity": float(arg_intel.get("argument_diversity") or 0.0),
+            "mean_argument_quality": float(arg_intel.get("mean_quality_score") or 0.0),
+            "opinion_stability": float(opinion.get("stability_index") or 0.0),
         },
         "note": (
-            "Simulation Intelligence (Phase 8.1): Persona Diversity V3, "
-            "Scheduler V3 in Execution, Interaction Engine, Cost Planner V3 — "
-            "offline multi-agent scaling; Live-Ceilings unverändert; "
+            "Simulation Intelligence (Phase 8.2): Argument Intelligence V2, "
+            "Debate Engine V2, Stance Classification V2, Opinion Dynamics V2, "
+            "Quality Dashboard — offline; Live-Ceilings unverändert; "
             "paid_llm_unlocked=false."
         ),
     }

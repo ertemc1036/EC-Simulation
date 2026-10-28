@@ -146,6 +146,8 @@ export interface AgentPositionsSnapshot {
   polarity_distribution?: Record<string, number>
   positions?: AgentPosition[]
   changes?: Array<Record<string, unknown>>
+  stance_classifier?: string
+  quality_fix?: string
   note?: string
 }
 
@@ -183,6 +185,8 @@ export interface SocietyOverview {
   scheduler_waves_executed?: number
   interaction_engine?: string
   intelligence_kpis?: Record<string, number>
+  debate_quality_score?: number | null
+  stance_clarity?: number | null
 }
 
 export interface SchedulerSnapshot {
@@ -268,9 +272,18 @@ export interface RelationshipsSnapshot {
 
 export interface OpinionDynamicsSnapshot {
   backend?: string
+  engine?: string
+  version?: number
+  quality_fix?: string
   rounds_tracked?: number
   total_evidenced_changes?: number
   shift_rate_per_agent_round?: number
+  stance_clarity?: number
+  unknown_share?: number
+  stability_index?: number
+  polarization?: number
+  entropy?: number
+  unknown_share_by_round?: Array<{ step?: number; unknown_share?: number }>
   transitions?: Record<string, number>
   chronology?: Array<{
     step?: number
@@ -278,8 +291,35 @@ export interface OpinionDynamicsSnapshot {
     polarity_distribution?: Record<string, number>
     changes_this_step?: number
     cumulative_changes?: number
+    stance_clarity?: number
+    unknown_share?: number
     change_samples?: Array<Record<string, unknown>>
   }>
+  note?: string
+}
+
+export interface DebateQualitySnapshot {
+  backend?: string
+  engine?: string
+  quality_fix?: string
+  score?: number
+  ok?: boolean
+  components?: Record<string, number>
+  note?: string
+}
+
+export interface ArgumentIntelligenceSnapshot {
+  backend?: string
+  engine?: string
+  quality_fix?: string
+  argument_count?: number
+  mean_quality_score?: number
+  argument_diversity?: number
+  address_rate?: number
+  claim_kinds?: Record<string, number>
+  top_themes?: Array<{ theme: string; count: number }>
+  repetition_blocks?: number
+  arguments?: Array<Record<string, unknown>>
   note?: string
 }
 
@@ -330,6 +370,10 @@ export interface SimulationIntelligence {
   phase?: number
   quality_fix?: string
   persona_engine?: string
+  debate_engine?: string
+  stance_classifier?: string
+  opinion_engine?: string
+  argument_engine?: string
   paid_llm_unlocked?: boolean
   persona?: {
     engine?: string
@@ -343,6 +387,10 @@ export interface SimulationIntelligence {
   }
   scheduler?: Record<string, unknown>
   interaction_engine?: Record<string, unknown>
+  discussion?: Record<string, unknown>
+  stance?: Record<string, unknown>
+  opinion?: Record<string, unknown>
+  debate_quality?: DebateQualitySnapshot
   cost_plan?: CostTokenPlan
   kpis?: Record<string, number>
   scale?: Record<string, unknown>
@@ -406,6 +454,7 @@ export interface DiscussionThreadEvent {
 export interface DiscussionSnapshot {
   backend?: string
   quality_fix?: string
+  debate_engine?: string
   max_argument_history_per_agent?: number
   max_global_arguments?: number
   argument_count?: number
@@ -418,6 +467,8 @@ export interface DiscussionSnapshot {
   oasis_nested_reply?: boolean
   arguments?: Array<Record<string, unknown>>
   threads?: DiscussionThreadEvent[]
+  argument_intelligence?: ArgumentIntelligenceSnapshot
+  debate_quality?: DebateQualitySnapshot
   note?: string
 }
 

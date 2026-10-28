@@ -23,6 +23,10 @@ Phase 6: polarity distribution + scale-safe payloads for 10/25/50 offline.
 Phase 7.3.2: stance reliability — keep clear own polarity across agreement
 replies; distinguish Zustimmung (social) from own stance; change only when
 evidenced. Labor live fixture ``20261028T115954Z-c16c749b`` markers.
+
+Phase 8.2 Stance Classification V2: soft-reject of unconditional rollout +
+support/caveats → ``conditional`` (fixture ``20261028T134318Z-ab541048``:
+Lehrerin Chancen + lehne flächendeckend ab; Eltern «nur unter Voraussetzungen»).
 """
 from __future__ import annotations
 
@@ -30,6 +34,9 @@ import hashlib
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+STANCE_CLASSIFIER = "v2"
+STANCE_QUALITY_FIX = "8.2"
 
 # Phase-5 social relations — only emit when evidenced.
 SOCIAL_RELATIONS = frozenset(
@@ -120,23 +127,27 @@ _PRO_MARKERS = (
 )
 # Verb support for ban / BGE / generic measure.
 # Allow longer bridges ("unterstütze die Einführung des bedingungslosen …").
+# Phase 8.2: hyphens in measure labels (KI-Lernassistenten) via [\w\-]+.
 _PRO_BAN_RE = re.compile(
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:das\s+)?verbot|"
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:die\s+)?maßnahme|"
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:das\s+|ein\s+|des\s+)?"
+    r"unterstütze(?:n|t)?\s+(?:[\w\-]+\s+){0,6}(?:das\s+)?verbot|"
+    r"unterstütze(?:n|t)?\s+(?:[\w\-]+\s+){0,6}(?:die\s+)?maßnahme|"
+    r"unterstütze(?:n|t)?\s+(?:[\w\-]+\s+){0,6}(?:das\s+|ein\s+|des\s+)?"
     r"(?:bedingungslose[sn]?\s+)?grundeinkommen|"
-    r"befürworte?\s+(?:\w+\s+){0,4}(?:das\s+)?verbot|"
-    r"befürworte?\s+(?:\w+\s+){0,4}(?:ein\s+|das\s+|bedingungslose\s+)?"
+    r"befürworte?\s+(?:[\w\-]+\s+){0,4}(?:das\s+)?verbot|"
+    r"befürworte?\s+(?:[\w\-]+\s+){0,4}(?:ein\s+|das\s+|bedingungslose\s+)?"
     r"grundeinkommen|"
-    r"bietet\s+(?:\w+\s+){0,3}(?:soziale\s+)?absicherung",
+    r"bietet\s+(?:[\w\-]+\s+){0,3}(?:soziale\s+)?absicherung|"
+    r"\bbin für\b|"
+    r"\bbin fuer\b|"
+    r"\bja zu\b",
     re.IGNORECASE,
 )
-# Reject phrasing with words between "lehne" and "ab".
+# Reject phrasing with words between "lehne" and "ab" (hyphen-safe, Phase 8.2).
 _CONTRA_REJECT_RE = re.compile(
-    r"lehne(?:n)?\s+(?:\w+\s+){0,8}ab\b|"
-    r"lehne(?:n)?\s+(?:\w+\s+){0,6}(?:das\s+)?(?:bedingungslose[sn]?\s+)?"
+    r"lehne(?:n)?\s+(?:[\w\-]+\s+){0,8}ab\b|"
+    r"lehne(?:n)?\s+(?:[\w\-]+\s+){0,6}(?:das\s+)?(?:bedingungslose[sn]?\s+)?"
     r"grundeinkommen|"
-    r"finanzierung\s+(?:\w+\s+){0,4}ungeklärt|"
+    r"finanzierung\s+(?:[\w\-]+\s+){0,4}ungeklärt|"
     r"inflations-?\s*und\s+steuerlast",
     re.IGNORECASE,
 )
@@ -324,10 +335,15 @@ _TEXT_DISAGREE_MARKERS = (
 # Clear stance polarities (Phase 7.3: conditional replaces legacy «exception»).
 _CLEAR_POLARITIES = frozenset({"pro", "contra", "conditional", "exception"})
 
-# Explicit conditional / «nur wenn» stance (Phase 7.3).
+# Explicit conditional / «nur wenn» stance (Phase 7.3 + 8.2).
 _CONDITIONAL_MARKERS = (
     "unter der bedingung",
     "unter der voraussetzung",
+    "unter klaren voraussetzung",
+    "unter klaren voraussetzungen",
+    "nur unter klaren",
+    "nur unter",
+    "allerdings nur unter",
     "nur wenn",
     "nur falls",
     "sofern",
@@ -340,12 +356,50 @@ _CONDITIONAL_MARKERS = (
     "nur mit ausnahmen",
     "nur mit übergangs",
     "nur mit uebergangs",
+    "verbindliche qualitätsstandards",
+    "klaren qualitäts- und schutzregeln",
+    "klaren voraussetzungen",
+    "pädagogischen konzepten",
+    "soliden pädagogischen",
+    "begleitete piloten",
+    "begleiteten pilot",
     # Live Vier-Tage caveats (Phase 7.3.2).
     "lohnausgleich wirklich hält",
     "lohnausgleich garantiert",
     "volle lohnausgleich garantiert",
     "flexible umsetzung",
     "flexible modelle können helfen",
+)
+
+# Soft reject of *unconditional / blanket* rollout while keeping caveated support
+# (Phase 8.2 fixture ab541048 — flächendeckend ablehnen ≠ hard contra).
+_SOFT_REJECT_UNCONDITIONAL = (
+    "flächendeckende einführung",
+    "flaechendeckende einfuehrung",
+    "flächendeckend",
+    "ungeprüfte vollausrollung",
+    "ungepruefte vollausrollung",
+    "ohne klare evidenz",
+    "ohne belastbare evidenz",
+    "ohne pädagogische reflexion",
+    "ohne paedagogische reflexion",
+    "bloßer technologiezwang",
+    "bloser technologiezwang",
+    "technikversprechen ohne",
+    "nicht nur als technisches gadget",
+    "kein bloßer technologie",
+)
+
+# Phrase-level only — bare «Chancen»/«Potenzial» appear in public seeds.
+_SOFT_SUPPORT_SIGNAL = (
+    "sehe ich durchaus chancen",
+    "sehe ich durchaus",
+    "sehe ich das potenzial",
+    "sehe das potenzial",
+    "sehe ich das potenzial von",
+    "grundsätzlich positiv",
+    "echte entlastung",
+    "förderlich eingesetzt",
 )
 
 
@@ -363,7 +417,19 @@ def extract_local_comment_refs(content: str) -> list[int]:
 
 def _is_seed_content(text: str) -> bool:
     """Manual Diskussionsimpuls seed is not a real agent stance statement."""
-    return bool(_SEED_CONTENT_RE.match((text or "").lstrip()))
+    raw = (text or "").lstrip()
+    if _SEED_CONTENT_RE.match(raw):
+        return True
+    # Phase 7+ public seeds use ``[Seed]`` without a slash suffix.
+    return bool(re.match(r"^\[seed\]\b", raw, re.IGNORECASE))
+
+
+def _soft_reject_unconditional(low: str) -> bool:
+    return any(m in low for m in _SOFT_REJECT_UNCONDITIONAL)
+
+
+def _soft_support_signal(low: str) -> bool:
+    return any(m in low for m in _SOFT_SUPPORT_SIGNAL)
 
 
 def _polarity(text: str) -> str:
@@ -372,6 +438,9 @@ def _polarity(text: str) -> str:
     Phase 7.3 prefers ``conditional`` for Ausnahme-/«nur wenn»-Stances.
     ``exception`` remains as an alias return for classic mobility Ausnahme
     markers so older fixtures/tests stay comparable; treat both as clear.
+
+    Phase 8.2 (V2): soft-reject of unconditional rollout combined with support
+    or caveat language → ``conditional`` (not hard ``contra``).
     """
     raw = text or ""
     if _is_seed_content(raw):
@@ -386,9 +455,18 @@ def _polarity(text: str) -> str:
     # Soft support phrasing common in live labor debates.
     if "grundsätzlich positiv" in low:
         pro += 1
+    if _soft_support_signal(low):
+        pro += 1
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
-    if _CONTRA_REJECT_RE.search(low):
+    hard_reject = bool(_CONTRA_REJECT_RE.search(low))
+    soft_reject = _soft_reject_unconditional(low)
+    if hard_reject and not soft_reject:
         contra += 1
+    elif hard_reject and soft_reject:
+        # Reject of blanket rollout — count as soft, not hard contra weight.
+        conditional_hit += 1
+    if soft_reject:
+        conditional_hit += 1
     if "kritisch, solange" in low or (
         "sehe ich die idee" in low and "kritisch" in low
     ):
@@ -399,7 +477,12 @@ def _polarity(text: str) -> str:
     # BGE balancing (Anreize/Löhne) only when not a hard reject.
     exception = classic_exception + (bge_balance if contra == 0 else 0)
 
-    # Explicit conditional language wins when not a hard reject.
+    # Phase 8.2: Chancen/Potenzial + soft unconditional reject → conditional.
+    if soft_reject and (_soft_support_signal(low) or conditional_hit or pro > 0):
+        return "conditional"
+    # Explicit conditional language wins when not a pure hard reject.
+    if conditional_hit and not (contra > conditional_hit and not soft_reject):
+        return "conditional"
     if conditional_hit and contra == 0:
         return "conditional"
     # Ausnahme-/Übergangsforderungen → conditional (7.3); keep exception alias
@@ -425,6 +508,11 @@ def _polarity(text: str) -> str:
     if any(m in low for m in _SHIFT_MARKERS):
         return "shifting"
     return "unknown"
+
+
+def classify_stance_v2(text: str) -> str:
+    """Public Stance Classification V2 entry point (alias of ``_polarity``)."""
+    return _polarity(text)
 
 
 def _is_confirmation(text: str) -> bool:
@@ -782,12 +870,15 @@ class PositionTracker:
             "polarity_distribution": self.polarity_distribution(),
             "positions": items,
             "changes": list(self._change_events),
+            "stance_classifier": STANCE_CLASSIFIER,
+            "quality_fix": STANCE_QUALITY_FIX,
             "note": (
                 "Persistente Agentenpositionen aus Goal-Seed + Posts/Kommentaren. "
                 "Seed-Impulse und Erstposition ≠ Wechsel; position_changed / "
                 "influenced_by nur bei belegtem Stance-Wechsel "
                 "(Bestätigung / Ausnahme-Restatement zählen nicht). "
-                "Phase 6: polarity_distribution für Society-Übersicht 10/25/50."
+                "Stance Classification V2 (Phase 8.2): soft-reject "
+                "flächendeckend/ungeprüft → conditional bei Chancen/Voraussetzungen."
             ),
         }
 
