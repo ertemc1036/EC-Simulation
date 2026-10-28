@@ -10,6 +10,9 @@ individual pools, declined-form canon — fixes live fixture ddfedb31.
 Phase 8.1 Persona Diversity V3: cycle domain stakeholders at 10/25/50,
 expanded education individual pools, unique names at scale.
 
+Phase 8.3 Persona Motivation Engine V4: structured values/fears/drivers
+attached to each profile; private goals carry motivation cues.
+
 Modes:
 - ``fixed_test`` — exactly the Phase-1/2 DEFAULT_AGENTS roster (5), for regression.
 - ``dynamic`` — scenario-derived unique profiles (default for configurable counts).
@@ -24,11 +27,19 @@ import re
 from dataclasses import replace
 
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
+from backend.simulation.persona_motivation import (
+    PERSONA_ENGINE,
+    build_persona_motivation,
+    enrich_goal_with_motivation,
+)
 from backend.simulation.topic_context import (
     INSTRUCTION_TOKEN_STEMS,
     detect_topic_domain,
     measure_label,
 )
+
+# Re-export for callers / health payloads.
+PERSONA_ENGINE_VERSION = PERSONA_ENGINE
 
 # Offline/Scripted society ceiling (Phase 6). Live-LLM still clamps to 5 in engine.
 MAX_GENERATABLE_AGENTS = 50
@@ -1809,6 +1820,16 @@ def generate_dynamic_agents(
         if user_name in used_user_names:
             user_name = f"{user_name}_{i}"
 
+        # Phase 8.3 — Persona Motivation Engine V4.
+        motivation = build_persona_motivation(
+            role_label=role_label,
+            occupation=occupation,
+            goal=goal,
+            scenario=scenario,
+            style=style,
+        )
+        goal = enrich_goal_with_motivation(goal, motivation)
+
         profile = AgentProfile(
             agent_id=i,
             user_name=user_name,
@@ -1819,6 +1840,7 @@ def generate_dynamic_agents(
             age=age,
             occupation=occupation,
             role_label=role_label,
+            motivation=motivation.to_dict(),
         )
         used_names.add(display.lower())
         used_user_names.add(user_name)

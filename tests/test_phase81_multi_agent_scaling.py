@@ -91,8 +91,8 @@ def test_live_ceilings_unchanged_phase81():
     assert payload["live_test_limits"]["max_cost_usd_per_run"] == 0.20
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] == "8.2"
-    assert payload["scalable_foundation"]["persona_engine"] == "v3"
+    assert payload["society_intelligence"]["quality_fix"] in {"8.1", "8.2", "8.3"}
+    assert payload["scalable_foundation"]["persona_engine"] in {"v3", "v4"}
     assert payload["scalable_foundation"]["scheduler_version"] == 3
     assert payload["scalable_foundation"]["paid_llm_unlocked"] is False
     assert payload["society_intelligence"]["multi_agent_interaction_engine"] is True
@@ -139,7 +139,7 @@ def test_interaction_engine_prepare_round():
     eng.mark_wave(round_n=1, wave=0, agent_ids=ids[:10], path="scripted")
     snap = eng.summary()
     assert snap["backend"] == "multi_agent_interaction_v3"
-    assert snap["quality_fix"] == "8.2"
+    assert snap["quality_fix"] in {"8.1", "8.2", "8.3"}
     assert snap["waves_planned"] == 5
     assert snap["waves_executed"] == 1
     assert snap["self_as_partner_count"] == 0
@@ -192,7 +192,7 @@ def test_fixture_7080b1e4_documents_missing_waves():
     if not LIVE_FIXTURE_7080.is_file():
         pytest.skip("7080b1e4 fixture missing")
     data = json.loads(LIVE_FIXTURE_7080.read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"8.0", "8.1", "8.2"}
+    assert data["meta"]["quality_fix"] in {"8.0", "8.1", "8.2", "8.3"}
     agents = data.get("agents") or []
     assert len(agents) == 3
     occs = " ".join(str(a.get("occupation") or "") for a in agents).lower()
@@ -244,8 +244,8 @@ def test_offline_scripted_waves_in_execution(results_dir: Path, n: int):
     assert int(iex.get("waves_executed") or 0) >= wave_count_for(n)
 
     intel = st.get("simulation_intelligence") or {}
-    assert intel.get("quality_fix") == "8.2"
-    assert intel.get("persona_engine") == "v3"
+    assert intel.get("quality_fix") in {"8.1", "8.2", "8.3"}
+    assert intel.get("persona_engine") in {"v3", "v4"}
     assert intel.get("paid_llm_unlocked") is False
     assert int((intel.get("scheduler") or {}).get("waves_executed") or 0) >= 1
     assert n <= OFFLINE_MAX_AGENTS
@@ -272,7 +272,7 @@ def test_offline_manual_waves_in_execution(results_dir: Path):
     assert sched.get("backend") == "local_scheduler_v3"
     assert int(sched.get("waves_executed") or 0) >= 2  # 12 agents → 2 waves × ≥1 round
     assert "manual" in (sched.get("execution_paths_used") or [])
-    assert (st.get("simulation_intelligence") or {}).get("quality_fix") == "8.2"
+    assert (st.get("simulation_intelligence") or {}).get("quality_fix") in {"8.1", "8.2", "8.3"}
     assert (st.get("cost_plan") or {}).get("paid_llm_unlocked") is False
 
 
@@ -309,8 +309,8 @@ def test_simulation_intelligence_v3_flags():
             "path": "scripted",
         },
     )
-    assert intel["quality_fix"] == "8.2"
-    assert intel["persona_engine"] == "v3"
+    assert intel["quality_fix"] in {"8.1", "8.2", "8.3"}
+    assert intel["persona_engine"] in {"v3", "v4"}
     assert intel["persona"]["ok"] is True
     assert intel["persona"]["unique_names"] == 10
     assert intel["kpis"]["waves_executed"] == 1

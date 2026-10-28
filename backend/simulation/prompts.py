@@ -63,16 +63,17 @@ Name: {name}
 Persona: {persona}
 Ziel (inkl. Konflikt): {goal}
 Stil: {style}
+Motivation: {motivation}
 
 # SPRACHE
 {language_instruction}
 
 # REGELN
 1. Inhalte in der angegebenen Sprache; kurze Argumente aus deiner individuellen Perspektive (Name/Beruf) — keine abstrakten Gruppenlabels.
-2. Aktionen dienen deinem Ziel — nicht fremde Stakeholder mitzusammenfassen.
+2. Aktionen dienen deinem Ziel und deiner Motivation — nicht fremde Stakeholder mitzusammenfassen.
 3. Interaktion: create_comment(post_id) als Reply (kein parent_comment_id); bei Bezug auf Kommentar →Kommentar#id im Text; like_*/dislike_* auf Post/Kommentar-IDs; kein search/refresh wenn FEED IDs zeigt; kein doppelter Essay-Post.
 4. KEINE Self-Replies: antworte nie mit →Kommentar# auf deine eigenen Kommentar-IDs; bevorzuge Cross-Agent-Bezüge (andere Nutzer).
-5. Intelligent diskutieren: greife fremde Argumente auf; wiederhole nicht dieselben Punkte; keine erfundenen Studien/URLs/Quellen.
+5. Intelligent diskutieren: greife fremde Argumente auf (Antwortbezug auf echte Punkte des Eltern-Kommentars); erfinde keine Themen, die der Bezugskommentar nicht enthält; wiederhole nicht dieselben Punkte; keine erfundenen Studien/URLs/Quellen.
 6. Position (pro/contra/bedingt/unsicher) halten oder mit Beleg ändern; Runde 2+: Thread fortsetzen (→Kommentar# fremd) und/oder like_comment/dislike_comment.
 7. Tool-Calling only; in Rolle bleiben; keine erfundenen Posts/Kommentare ohne Tool-Call.
 """
@@ -113,11 +114,23 @@ def build_profile_for_template(
     language: str,
 ) -> dict[str, str]:
     """Profile keys must match SYSTEM_PROMPT_TEMPLATE placeholders."""
+    mot = getattr(profile, "motivation", None) or {}
+    if isinstance(mot, dict) and (mot.get("values") or mot.get("drivers")):
+        motivation = (
+            f"Werte={', '.join((mot.get('values') or [])[:3])}; "
+            f"Risiken={', '.join((mot.get('fears') or [])[:3])}; "
+            f"Treiber={', '.join((mot.get('drivers') or [])[:3])}; "
+            f"Stil={mot.get('decision_style') or 'balanced'}"
+        )
+    else:
+        # Goal may already carry a V4 Motivation: block.
+        motivation = "aus Ziel/Persona ableiten; keine erfundenen Motive"
     return {
         "name": profile.name,
         "persona": profile.description,
         "goal": profile.goal,
         "style": profile.style,
+        "motivation": motivation,
         "scenario": scenario.strip() or "(kein Szenario)",
         "language_instruction": language_instruction(language),
     }

@@ -7,6 +7,9 @@ nested structure is reconstructed from local ``→Kommentar#`` refs only.
 
 Phase 8.2 Debate Engine V2: Argument Intelligence + debate quality score
 in snapshots (no provider calls).
+
+Phase 8.3: discussion snapshots may attach Argument-Grounded Interaction V3
+and Interaction Quality Evaluation (wired by the engine).
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ MAX_GLOBAL_ARGUMENTS = 48
 MAX_THREAD_EVENTS = 80
 ARGUMENT_FP_CHARS = 160
 PROMPT_HINT_CHARS = 220
-QUALITY_FIX = "8.2"
+QUALITY_FIX = "8.3"
 DEBATE_ENGINE = "v2"
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
@@ -458,8 +461,9 @@ class DiscussionEngine:
             "argument_intelligence": arg_intel,
             "debate_quality": debate_q,
             "note": (
-                "Debate Engine V2 (Phase 8.2): Argument-History + Claim-Intelligence "
+                "Debate Engine V2 (Phase 8.2/8.3): Argument-History + Claim-Intelligence "
                 "+ Quality-Score. Threads aus lokalen →Kommentar#-Refs. "
-                "OASIS: kein parent_comment_id. Keine erfundenen Quellen."
+                "OASIS: kein parent_comment_id. Keine erfundenen Quellen. "
+                "Interaction Quality / Argument-Grounded V3 werden vom Engine angehängt."
             ),
         }

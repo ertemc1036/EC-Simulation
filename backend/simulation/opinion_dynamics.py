@@ -1,15 +1,16 @@
-"""Phase 7 + 8.2 — Opinion dynamics chronology (V2).
+"""Phase 7 + 8.2 + 8.3 — Opinion dynamics chronology (V3).
 
 Builds on PositionTracker change events. Does not invent polarity flips.
 V2 adds stance clarity, stability, polarization, and unknown-share series.
+V3 adds grounded-reply share and motivation-linked stability signals.
 """
 from __future__ import annotations
 
 import math
 from typing import Any
 
-QUALITY_FIX = "8.2"
-OPINION_ENGINE = "v2"
+QUALITY_FIX = "8.3"
+OPINION_ENGINE = "v3"
 
 
 def _unknown_share(polarity_distribution: dict[str, int]) -> float:
@@ -53,16 +54,36 @@ def _entropy(polarity_distribution: dict[str, int]) -> float:
 
 
 class OpinionDynamics:
-    """Round-by-round polarity chronology and shift analytics (V2)."""
+    """Round-by-round polarity chronology and shift analytics (V3)."""
 
     def __init__(self, *, max_rounds_tracked: int = 16) -> None:
         self.max_rounds_tracked = max(1, int(max_rounds_tracked))
         self._round_snapshots: list[dict[str, Any]] = []
         self._seen_steps: set[int] = set()
+        self._grounded_reply_share: float | None = None
+        self._motivation_coverage: float | None = None
 
     def clear(self) -> None:
         self._round_snapshots.clear()
         self._seen_steps.clear()
+        self._grounded_reply_share = None
+        self._motivation_coverage = None
+
+    def set_interaction_signals(
+        self,
+        *,
+        grounded_reply_share: float | None = None,
+        motivation_coverage: float | None = None,
+    ) -> None:
+        """Optional V3 signals from Interaction Quality / Persona Motivation."""
+        if grounded_reply_share is not None:
+            self._grounded_reply_share = max(
+                0.0, min(1.0, float(grounded_reply_share))
+            )
+        if motivation_coverage is not None:
+            self._motivation_coverage = max(
+                0.0, min(1.0, float(motivation_coverage))
+            )
 
     def record_round(
         self,
@@ -86,6 +107,8 @@ class OpinionDynamics:
             "unknown_share": unk,
             "polarization": _polarization(dist),
             "entropy": _entropy(dist),
+            "grounded_reply_share": self._grounded_reply_share,
+            "motivation_coverage": self._motivation_coverage,
         }
         if step_i in self._seen_steps:
             # Refresh the existing frame for the same step (latest sync wins).
@@ -149,6 +172,18 @@ class OpinionDynamics:
             stability = round(max(0.0, 1.0 - (sum(deltas) / len(deltas))), 4)
         else:
             stability = 1.0 if clarities else 0.0
+        # V3: boost stability slightly when motivation coverage is high and
+        # grounded replies dominate (fewer invented attributions → smoother dynamics).
+        if self._motivation_coverage is not None and self._grounded_reply_share is not None:
+            stability = round(
+                min(
+                    1.0,
+                    stability * 0.85
+                    + 0.10 * float(self._motivation_coverage)
+                    + 0.05 * float(self._grounded_reply_share),
+                ),
+                4,
+            )
         final_dist = (frames[-1].get("polarity_distribution") or {}) if frames else {}
         final_clarity = clarities[-1] if clarities else 0.0
         final_unk = unknown_series[-1] if unknown_series else 1.0
@@ -156,7 +191,7 @@ class OpinionDynamics:
         return {
             "backend": "local",
             "engine": OPINION_ENGINE,
-            "version": 2,
+            "version": 3,
             "quality_fix": QUALITY_FIX,
             "rounds_tracked": rounds,
             "total_evidenced_changes": total_changes,
@@ -167,13 +202,16 @@ class OpinionDynamics:
             "stability_index": stability,
             "polarization": _polarization(final_dist),
             "entropy": _entropy(final_dist),
+            "grounded_reply_share": self._grounded_reply_share,
+            "motivation_coverage": self._motivation_coverage,
             "unknown_share_by_round": [
                 {"step": f.get("step"), "unknown_share": f.get("unknown_share")}
                 for f in frames
             ],
             "chronology": frames,
             "note": (
-                "Meinungsdynamik V2: Chronologie + Stance-Klarheit, Stabilität, "
-                "Polarisierung. Keine erfundenen Flips; Scripted liefert Offline-Evidenz."
+                "Meinungsdynamik V3: Chronologie + Stance-Klarheit, Stabilität, "
+                "Polarisierung, Antwortbezug-/Motivationssignale. "
+                "Keine erfundenen Flips; Scripted liefert Offline-Evidenz."
             ),
         }

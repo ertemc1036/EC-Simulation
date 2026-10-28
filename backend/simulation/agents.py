@@ -18,6 +18,8 @@ class AgentProfile:
     age: int | None = None
     occupation: str | None = None
     role_label: str | None = None
+    # Phase 8.3 Persona Motivation Engine V4 (optional structured drivers).
+    motivation: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

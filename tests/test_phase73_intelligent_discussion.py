@@ -292,7 +292,7 @@ def test_manual_engine_discussion_payload(results_dir: Path):
     state = _wait_terminal(engine)
     assert state["status"] in {"completed", "limit_reached"}
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"7.3", "7.3.1", "7.3.2", "8.0", "8.1", "8.2"}
+    assert data["meta"]["quality_fix"] in {"7.3", "7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3"}
     assert data["meta"]["prompt_bundle_id"] == "ec-custom-forum-de-v7"
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"]["society_intelligence"]["intelligent_discussion"] is True
@@ -352,7 +352,7 @@ def test_offline_scale_scripted_phase73(results_dir: Path, n: int):
     assert state["status"] in {"completed", "limit_reached"}, state.get("message")
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
     assert data["meta"]["execution_kind"] == "scripted"
-    assert data["meta"]["quality_fix"] in {"7.3", "7.3.1", "7.3.2", "8.0", "8.1", "8.2"}
+    assert data["meta"]["quality_fix"] in {"7.3", "7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3"}
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"].get("content_synthetic") is True
     assert data["scheduler"]["self_as_partner_count"] == 0

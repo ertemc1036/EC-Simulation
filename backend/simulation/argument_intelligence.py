@@ -26,7 +26,7 @@ def _claims_invented_source(text: str) -> bool:
 
     return claims_invented_source(text)
 
-QUALITY_FIX = "8.2"
+QUALITY_FIX = "8.3"
 ARGUMENT_ENGINE = "v2"
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
