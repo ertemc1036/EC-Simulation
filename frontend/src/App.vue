@@ -143,12 +143,41 @@ const societyOverview = computed(() => {
     opinion_rounds_tracked: sim.value?.opinion_dynamics?.rounds_tracked ?? 0,
     analytics_kpis: sim.value?.society_analytics?.kpis || {},
     persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v3',
-    quality_fix: '8.1',
+    quality_fix: sim.value?.simulation_intelligence?.quality_fix || '8.2',
     planned_cost_usd: sim.value?.cost_plan?.planned_cost_usd ?? 0,
     planned_waves: sim.value?.cost_plan?.planned_waves ?? 0,
     scheduler_waves_executed: sim.value?.scheduler?.waves_executed ?? 0,
     intelligence_kpis: sim.value?.simulation_intelligence?.kpis || {},
+    debate_quality_score:
+      sim.value?.discussion?.debate_quality?.score ??
+      sim.value?.simulation_intelligence?.kpis?.debate_quality_score ??
+      null,
+    stance_clarity:
+      sim.value?.opinion_dynamics?.stance_clarity ??
+      sim.value?.simulation_intelligence?.kpis?.stance_clarity ??
+      null,
   }
+})
+
+const debateQuality = computed(() => {
+  const dq = sim.value?.discussion?.debate_quality
+  if (dq && typeof dq === 'object') return dq
+  return simulationIntelligence.value?.debate_quality || null
+})
+
+const argumentIntelligence = computed(() => {
+  return sim.value?.discussion?.argument_intelligence || null
+})
+
+const claimKindEntries = computed(() => {
+  const kinds =
+    argumentIntelligence.value?.claim_kinds ||
+    simulationIntelligence.value?.discussion?.claim_kinds ||
+    {}
+  return Object.entries(kinds).map(([label, count]) => ({
+    label,
+    count: Number(count) || 0,
+  }))
 })
 
 const polarityBars = computed(() => {
@@ -460,9 +489,10 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-8.1 Controlled Multi-Agent Scaling — Scheduler V3 in Execution,
-        Interaction Engine, Persona Diversity V3, Cost Planner V3
-        (Offline 10/25/50 × ≤4). Live-LLM bleibt ≤5 · paid_llm_unlocked=false.
+        Phase-8.2 Simulation Intelligence &amp; Debate Quality — Argument
+        Intelligence V2, Debate Engine V2, Stance Classification V2, Opinion
+        Dynamics V2, Quality Dashboard (Offline 10/25/50 × ≤4). Live-LLM bleibt
+        ≤5 · paid_llm_unlocked=false.
       </p>
     </header>
 
@@ -1005,7 +1035,7 @@ onUnmounted(() => {
     <section class="analytics" v-if="societyAnalytics || analyticsKpis">
       <h2>Society Analytics</h2>
       <p class="lede-sm">
-        Phase-8.1 Kennzahlen — Memory, Beziehungen, Meinungsdynamik, Planner V3.
+        Phase-8.2 Kennzahlen — Debate Quality, Stance V2, Opinion V2, Planner V3.
         Offline-Scale {{ societyAnalytics?.scale?.agent_count ?? societyOverview?.agent_count ?? '—' }}
         Agenten × ≤{{ societyAnalytics?.scale?.offline_max_rounds ?? 4 }} Runden ·
         paid_llm_unlocked={{ societyAnalytics?.scale?.paid_llm_unlocked === false ? 'false' : '—' }}
@@ -1037,6 +1067,64 @@ onUnmounted(() => {
           <span class="v">{{ societyAnalytics?.relationships?.bond_count ?? societyOverview?.relationship_bonds ?? 0 }}</span>
         </div>
       </div>
+
+      <h3>Quality Dashboard V2</h3>
+      <div class="society-grid" v-if="debateQuality || argumentIntelligence || simulationIntelligence">
+        <div>
+          <span class="k">Debate Quality</span>
+          <span class="v mono">{{ debateQuality?.score ?? societyOverview?.debate_quality_score ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Stance Clarity</span>
+          <span class="v mono">{{ sim?.opinion_dynamics?.stance_clarity ?? societyOverview?.stance_clarity ?? simulationIntelligence?.kpis?.stance_clarity ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Argument Diversity</span>
+          <span class="v mono">{{ argumentIntelligence?.argument_diversity ?? simulationIntelligence?.kpis?.argument_diversity ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Mean Arg. Quality</span>
+          <span class="v mono">{{ argumentIntelligence?.mean_quality_score ?? simulationIntelligence?.kpis?.mean_argument_quality ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Address Rate</span>
+          <span class="v mono">{{ argumentIntelligence?.address_rate ?? debateQuality?.components?.address_rate ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Opinion Stability</span>
+          <span class="v mono">{{ sim?.opinion_dynamics?.stability_index ?? simulationIntelligence?.kpis?.opinion_stability ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Unknown Stance %</span>
+          <span class="v mono">{{ simulationIntelligence?.stance?.unknown_share ?? simulationIntelligence?.kpis?.unknown_stance_share ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Repetition Blocks</span>
+          <span class="v mono">{{ sim?.discussion?.repetition_blocks ?? 0 }}</span>
+        </div>
+      </div>
+      <ul class="polarity-bars" v-if="claimKindEntries.length" style="margin-top: 0.75rem">
+        <li v-for="b in claimKindEntries" :key="'ck' + b.label">
+          <span class="pol-label">{{ b.label }}</span>
+          <span class="pol-track">
+            <span
+              class="pol-fill"
+              :style="{
+                width:
+                  Math.round(
+                    (100 * b.count) /
+                      Math.max(
+                        1,
+                        claimKindEntries.reduce((s, x) => s + x.count, 0),
+                      ),
+                  ) + '%',
+              }"
+            />
+          </span>
+          <span class="pol-count mono">{{ b.count }}</span>
+        </li>
+      </ul>
+      <p v-else class="empty">Claim-Arten nach Offline-Lauf sichtbar.</p>
 
       <h3>Simulation Intelligence &amp; Cost Plan V3</h3>
       <div class="society-grid" v-if="simulationIntelligence || costPlan">
@@ -1079,6 +1167,14 @@ onUnmounted(() => {
         <div>
           <span class="k">Exec Path</span>
           <span class="v mono">{{ sim?.interaction_engine?.path ?? simulationIntelligence?.interaction_engine?.path ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Stance Classifier</span>
+          <span class="v mono">{{ simulationIntelligence?.stance_classifier || sim?.agent_positions?.stance_classifier || 'v2' }}</span>
+        </div>
+        <div>
+          <span class="k">Debate Engine</span>
+          <span class="v mono">{{ sim?.discussion?.debate_engine || simulationIntelligence?.debate_engine || 'v2' }}</span>
         </div>
       </div>
       <p v-else class="empty">Intelligence nach Offline-Lauf sichtbar.</p>

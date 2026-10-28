@@ -1,4 +1,4 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 8.1."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 8.2."""
 from __future__ import annotations
 
 import hashlib
@@ -42,6 +42,7 @@ _PHASE8_MARKERS = (
     ROOT / "backend" / "simulation" / "social_scheduler.py",
     ROOT / "backend" / "simulation" / "scripted_model.py",
     ROOT / "backend" / "simulation" / "discussion_engine.py",
+    ROOT / "backend" / "simulation" / "argument_intelligence.py",
     ROOT / "backend" / "simulation" / "cost_token_planner.py",
     ROOT / "backend" / "simulation" / "simulation_intelligence.py",
     ROOT / "backend" / "simulation" / "interaction_engine.py",
@@ -120,7 +121,9 @@ def health():
                 "expects_phase": EXPECTED_PHASE,
                 "port": settings.flask_port,
                 "persona_engine": "v3",
-                "quality_fix": "8.1",
+                "quality_fix": "8.2",
+                "debate_engine": "v2",
+                "stance_classifier": "v2",
                 "scheduler_version": 3,
             },
             "zep": engine.zep.status,

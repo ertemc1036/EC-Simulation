@@ -683,8 +683,9 @@ class SimulationEngine:
                 "offline_max_agents": OFFLINE_MAX_AGENTS,
                 "paid_llm_unlocked_for_scale": False,
                 "persona_engine": "v3",
-                "quality_fix": "8.1",
+                "quality_fix": "8.2",
             }
+            seed_positions = self._positions.positions_payload()
             self.state = SimulationState(
                 run_id=run_id,
                 status="running",
@@ -699,7 +700,7 @@ class SimulationEngine:
                 message=message,
                 agents=agent_dicts,
                 agent_memory=self._local_memory.snapshot(),
-                agent_positions=self._positions.positions_payload(),
+                agent_positions=seed_positions,
                 relationships=self._relationships.snapshot(),
                 opinion_dynamics=self._opinion.snapshot(),
                 society_analytics={},
@@ -709,7 +710,11 @@ class SimulationEngine:
                 scheduler=self._scheduler.summary(),
                 interaction_engine=self._interaction.summary(),
                 society_overview=overview,
-                discussion=self._discussion.snapshot(),
+                discussion=self._discussion.snapshot(
+                    polarity_distribution=seed_positions.get("polarity_distribution")
+                    or {},
+                    agent_count=len(run_agents),
+                ),
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -1633,7 +1638,16 @@ class SimulationEngine:
         self.state.relationships = self._relationships.snapshot()
         self.state.opinion_dynamics = self._opinion.snapshot()
         self.state.knowledge_graph = self._knowledge_graph.to_dict()
-        self.state.discussion = self._discussion.snapshot()
+        pol_tmp = positions_payload.get("polarity_distribution") or {}
+        unk_tmp = float(pol_tmp.get("unknown") or 0) + float(
+            pol_tmp.get("uncertain") or 0
+        )
+        pol_total = max(1.0, float(sum(int(v) for v in pol_tmp.values()) or 1))
+        self.state.discussion = self._discussion.snapshot(
+            polarity_distribution=pol_tmp,
+            unknown_stance_share=unk_tmp / pol_total,
+            agent_count=len(self._run_agents),
+        )
         self.state.interaction_summary = _build_interaction_summary(
             comments=self.state.comments,
             reactions=self.state.reactions,
@@ -1695,6 +1709,7 @@ class SimulationEngine:
             discussion=self.state.discussion,
             agent_positions=positions_payload,
             interaction_engine=self.state.interaction_engine,
+            opinion_dynamics=self.state.opinion_dynamics,
         )
         self.state.society_overview = {
             "agent_count": len(self._run_agents),
@@ -1728,12 +1743,16 @@ class SimulationEngine:
             ),
             "analytics_kpis": (self.state.society_analytics or {}).get("kpis") or {},
             "persona_engine": "v3",
-            "quality_fix": "8.1",
+            "quality_fix": "8.2",
             "planned_cost_usd": cost_plan.planned_cost_usd,
             "planned_waves": cost_plan.planned_waves,
             "intelligence_kpis": (self.state.simulation_intelligence or {}).get("kpis")
             or {},
             "interaction_engine": (self.state.interaction_engine or {}).get("backend"),
+            "debate_quality_score": (
+                (self.state.discussion or {}).get("debate_quality") or {}
+            ).get("score"),
+            "stance_clarity": (self.state.opinion_dynamics or {}).get("stance_clarity"),
         }
 
     def _persist_results(
@@ -1772,7 +1791,7 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 8,
-                "quality_fix": "8.1",
+                "quality_fix": "8.2",
                 "persona_engine": "v3",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
@@ -1841,7 +1860,7 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "8.1",
+                    "quality_fix": "8.2",
                     "persona_engine": "v3",
                     "topic_aware_personas": True,
                     "individual_personas": True,
@@ -1850,6 +1869,11 @@ class SimulationEngine:
                     "public_seed_no_goal_leak": True,
                     "intelligent_discussion": True,
                     "argument_history_bounded": True,
+                    "argument_intelligence_v2": True,
+                    "debate_engine_v2": True,
+                    "stance_classification_v2": True,
+                    "opinion_dynamics_v2": True,
+                    "quality_dashboard": True,
                     "cost_token_planner": True,
                     "simulation_intelligence": True,
                     "multi_agent_interaction_engine": True,

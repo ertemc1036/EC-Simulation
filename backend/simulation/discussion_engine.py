@@ -1,9 +1,12 @@
-"""Phase 7.3 — Intelligent Discussion Engine (offline-safe, no provider calls).
+"""Phase 7.3 + 8.2 — Intelligent Discussion / Debate Engine V2 (offline-safe).
 
 Tracks argument fingerprints, bounded per-agent history, logical thread
 metadata (parent/author/recipient/round), and anti-repetition hints for
 prompts / scripted content. OASIS still has no ``parent_comment_id`` —
 nested structure is reconstructed from local ``→Kommentar#`` refs only.
+
+Phase 8.2 Debate Engine V2: Argument Intelligence + debate quality score
+in snapshots (no provider calls).
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ MAX_GLOBAL_ARGUMENTS = 48
 MAX_THREAD_EVENTS = 80
 ARGUMENT_FP_CHARS = 160
 PROMPT_HINT_CHARS = 220
+QUALITY_FIX = "8.2"
+DEBATE_ENGINE = "v2"
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
 _SOURCE_CLAIM_RE = re.compile(
@@ -393,16 +398,47 @@ class DiscussionEngine:
         extra = angles[(int(agent_id) + int(call_index)) % len(angles)]
         return f"{body.rstrip()} {extra}"
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(
+        self,
+        *,
+        polarity_distribution: dict[str, int] | None = None,
+        unknown_stance_share: float | None = None,
+        agent_count: int = 0,
+    ) -> dict[str, Any]:
         self_replies = sum(1 for t in self._threads if t.self_reply)
         cross = sum(
             1
             for t in self._threads
             if t.parent_comment_id is not None and not t.self_reply
         )
+        args = [r.to_dict() for r in self._global[-24:]]
+        threads = [t.to_dict() for t in self._threads[-40:]]
+        # Lazy import avoids cycles with argument_intelligence → discussion.
+        from backend.simulation.argument_intelligence import (
+            build_argument_intelligence,
+            debate_quality_score,
+        )
+
+        pol = polarity_distribution or {}
+        if unknown_stance_share is None:
+            total = sum(int(v) for v in pol.values()) or 0
+            unk = int(pol.get("unknown") or 0) + int(pol.get("uncertain") or 0)
+            unknown_stance_share = (unk / float(total)) if total else 0.0
+        arg_intel = build_argument_intelligence(
+            arguments=args,
+            threads=threads,
+            repetition_blocks=self._repetition_blocks,
+            agent_count=agent_count or len(self._by_agent),
+        )
+        debate_q = debate_quality_score(
+            argument_intel=arg_intel,
+            unknown_stance_share=float(unknown_stance_share or 0.0),
+            polarity_distribution=pol,
+        )
         return {
             "backend": "local",
-            "quality_fix": "8.1",
+            "quality_fix": QUALITY_FIX,
+            "debate_engine": DEBATE_ENGINE,
             "max_argument_history_per_agent": self.max_history_per_agent,
             "max_global_arguments": self.max_global,
             "argument_count": len(self._global),
@@ -413,15 +449,17 @@ class DiscussionEngine:
             "cross_agent_replies": cross,
             "parent_comment_id_supported": False,
             "oasis_nested_reply": False,
-            "arguments": [r.to_dict() for r in self._global[-24:]],
+            "arguments": arg_intel.get("arguments") or args,
             "by_agent": {
                 str(aid): [r.to_dict() for r in recs]
                 for aid, recs in sorted(self._by_agent.items())
             },
-            "threads": [t.to_dict() for t in self._threads[-40:]],
+            "threads": threads,
+            "argument_intelligence": arg_intel,
+            "debate_quality": debate_q,
             "note": (
-                "Argument-History begrenzt; Threads aus lokalen →Kommentar#-Refs "
-                "rekonstruiert. OASIS: kein parent_comment_id — Limits nicht "
-                "vortäuschen. Keine erfundenen Quellen."
+                "Debate Engine V2 (Phase 8.2): Argument-History + Claim-Intelligence "
+                "+ Quality-Score. Threads aus lokalen →Kommentar#-Refs. "
+                "OASIS: kein parent_comment_id. Keine erfundenen Quellen."
             ),
         }
