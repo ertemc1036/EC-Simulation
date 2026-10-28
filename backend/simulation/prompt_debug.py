@@ -15,6 +15,7 @@ from typing import Any
 # Stable id for the EC custom prompt bundle (system + decision templates).
 # v7 = Phase 7.3 intelligent discussion (argument pickup, anti-repetition,
 # individual personas, conditional stance) on v6 caps / token limits.
+# Phase 7.3.1 keeps the same prompt bundle; topic integrity is engine-side.
 PROMPT_BUNDLE_ID = "ec-custom-forum-de-v7"
 
 # Markers that prove OASIS stock Reddit/Twitter framing reached the client.

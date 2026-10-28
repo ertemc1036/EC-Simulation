@@ -236,7 +236,7 @@ def test_manual_engine_seed_and_social_metrics(results_dir: Path):
     state = _wait_terminal(engine)
     assert state["status"] in {"completed", "limit_reached"}
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"7.2", "7.3"}
+    assert data["meta"]["quality_fix"] in {"7.2", "7.3", "7.3.1"}
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"]["live_llm_limits_unchanged"]["max_agents"] == 5
     # Manual path seeds via argument posts (no LLM seed); public still clean.
@@ -281,7 +281,7 @@ def test_offline_scale_scripted_social_dynamics(results_dir: Path, n: int):
     assert state["status"] in {"completed", "limit_reached"}, state.get("message")
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
     assert data["meta"]["execution_kind"] == "scripted"
-    assert data["meta"]["quality_fix"] in {"7.2", "7.3"}
+    assert data["meta"]["quality_fix"] in {"7.2", "7.3", "7.3.1"}
     # Scripted local model — no live OpenAI; paid unlock stays false.
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"].get("content_synthetic") is True

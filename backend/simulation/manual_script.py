@@ -62,10 +62,10 @@ def _argument_line(
             f"Vollauszahlung ohne Gegenfinanzierung."
         )
         agree = (
-            f"stimme zu: ja zum Grundeinkommen als Absicherung, mit Messpunkten."
+            f"stimme zu: ja zu {measure} als Absicherung, mit Messpunkten."
         )
         disagree = (
-            f"widerspreche: gegen das Grundeinkommen ohne Finanzierungsnachweis."
+            f"widerspreche: gegen {measure} ohne Finanzierungsnachweis."
         )
     elif domain == "mobility":
         pro = (

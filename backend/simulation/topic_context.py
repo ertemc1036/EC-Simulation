@@ -2,6 +2,7 @@
 
 Keeps public posts/comments thesis-specific without Berlin-mobility leftovers
 when the scenario is about income / BGE / other non-mobility theses.
+Phase 7.3.1: never invent BGE from stakeholder role words (Arbeitnehmer…).
 No LLM — deterministic keyword heuristics only.
 """
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-TopicDomain = Literal["mobility", "income", "generic"]
+TopicDomain = Literal["mobility", "income", "labor", "generic"]
 
 _MOBILITY_CUES = (
     "verbot",
@@ -27,6 +28,8 @@ _MOBILITY_CUES = (
     "innenstadt",
     "ring",
 )
+# True income/BGE cues only — NEVER stakeholder role nouns (Arbeitnehmer…).
+# Role words previously leaked BGE into Vier-Tage-Woche (fixture bdfb9e9d).
 _INCOME_CUES = (
     "grundeinkommen",
     "bedingungslos",
@@ -34,13 +37,19 @@ _INCOME_CUES = (
     "transfer",
     "sozialhilfe",
     "mindestsicherung",
-    "arbeitnehmer",
-    "arbeitslose",
-    "rentner",
-    "studierende",
-    "einkommen",
     "1.500",
     "1500",
+)
+_LABOR_CUES = (
+    "vier-tage-woche",
+    "vier-tage",
+    "4-tage-woche",
+    "lohnausgleich",
+    "arbeitszeit",
+    "wochenarbeitszeit",
+    "vollzeitwoche",
+    "work-life",
+    "worklife",
 )
 
 # Instruction / meta verbs that must not become topic keywords or agent names.
@@ -92,16 +101,54 @@ _MOBILITY_LEAK = (
     "s-bahn",
 )
 
+# Markers that must not appear unless present in the scenario thesis.
+_BGE_ONLY_MARKERS = (
+    "grundeinkommen",
+    "bedingungsloses grundeinkommen",
+)
+_LABOR_ONLY_MARKERS = (
+    "vier-tage-woche",
+    "lohnausgleich",
+)
+_MOBILITY_ONLY_MARKERS = (
+    "lieferfenster",
+    "stadtbevölkerung",
+    "stadtbevoelkerung",
+    "mobilitätseingeschränkt",
+    "mobilitaetseingeschraenkt",
+    "pauschale verbote",
+    "durchgangsverkehr",
+)
+_HOUSING_ONLY_MARKERS = ("mietendeckel", "mietpreisbremse")
+_EDU_ONLY_MARKERS = ("schulreform",)
+_TAX_ONLY_MARKERS = ("ki-steuer",)
+
+
+def _cue_hit(low: str, cue: str) -> bool:
+    """Substring match with word-ish boundaries for short cues (auto≠automatisiert)."""
+    if len(cue) <= 4:
+        return bool(
+            re.search(rf"(?<![a-zäöüß0-9]){re.escape(cue)}(?![a-zäöüß0-9])", low)
+        )
+    return cue in low
+
 
 def detect_topic_domain(scenario: str) -> TopicDomain:
     """Classify scenario domain for persona + argument templates."""
     low = (scenario or "").lower()
-    income_hits = sum(1 for c in _INCOME_CUES if c in low)
-    mobility_hits = sum(1 for c in _MOBILITY_CUES if c in low)
-    # Explicit BGE / income theses win even if «Bürger» appears.
-    if income_hits >= 2 or "grundeinkommen" in low or "bedingungslos" in low:
+    income_hits = sum(1 for c in _INCOME_CUES if _cue_hit(low, c))
+    mobility_hits = sum(1 for c in _MOBILITY_CUES if _cue_hit(low, c))
+    labor_hits = sum(1 for c in _LABOR_CUES if _cue_hit(low, c))
+    # Explicit BGE / income theses win even if «Bürger» / labor roles appear.
+    if (
+        income_hits >= 1
+        and ("grundeinkommen" in low or "bedingungslos" in low or "bge" in low)
+    ) or income_hits >= 2:
         return "income"
-    if mobility_hits >= 2 or ("verbot" in low and "auto" in low):
+    if labor_hits >= 1:
+        return "labor"
+    auto_hit = _cue_hit(low, "auto") or _cue_hit(low, "autos")
+    if mobility_hits >= 2 or ("verbot" in low and auto_hit):
         return "mobility"
     if income_hits > mobility_hits and income_hits > 0:
         return "income"
@@ -110,27 +157,48 @@ def detect_topic_domain(scenario: str) -> TopicDomain:
     return "generic"
 
 
+def _extract_measure_span(scenario: str) -> str | None:
+    """Pull the debated measure phrase from the thesis text (never invent BGE)."""
+    text = (scenario or "").strip()
+    if not text:
+        return None
+    patterns = (
+        r"(?:bedingungsloses\s+)?[Gg]rundeinkommen(?:\s+von\s+[\d.]+(?:\s*€)?)?",
+        r"[Vv]ier-Tage-Woche(?:\s+bei\s+vollem\s+Lohnausgleich)?",
+        r"[Mm]ietendeckel(?:\s+für\s+(?:Bestands)?wohnungen)?",
+        r"(?:[Ee]inführung\s+einer\s+)?[Kk]I-Steuer(?:\s+auf\s+KI)?",
+        r"[Ss]chulreform",
+        r"[Aa]uto-?[Vv]erbot",
+    )
+    for pat in patterns:
+        m = re.search(pat, text)
+        if m:
+            return re.sub(r"\s+", " ", m.group(0)).strip()[:70]
+    return None
+
+
 def measure_label(scenario: str, domain: TopicDomain | None = None) -> str:
-    """Short noun phrase for the debated measure."""
+    """Short noun phrase for the debated measure — always from current scenario."""
     domain = domain or detect_topic_domain(scenario)
     text = (scenario or "").strip()
-    if domain == "income":
-        # Prefer full BGE phrasing; allow decimals like 1.500 inside the span.
-        m = re.search(
-            r"(?:bedingungsloses\s+)?[Gg]rundeinkommen(?:\s+von\s+[\d.]+(?:\s*€)?)?",
-            text,
-        )
-        if m:
-            snippet = re.sub(r"\s+", " ", m.group(0)).strip()
-            return snippet[:70]
+    low = text.lower()
+    extracted = _extract_measure_span(text)
+    if extracted:
+        return extracted
+    # Domain fallbacks only when the cue is actually present — never invent BGE.
+    if domain == "income" and (
+        "grundeinkommen" in low or "bedingungslos" in low or "bge" in low
+    ):
         return "bedingungsloses Grundeinkommen"
+    if domain == "labor":
+        return "Vier-Tage-Woche"
     if domain == "mobility":
-        if "verbot" in text.lower():
+        if "verbot" in low:
             return "Auto-Verbot"
         return "Verkehrsmaßnahme"
-    # First sentence fragment as generic measure label.
-    first = re.split(r"[.?!\n]", text, maxsplit=1)[0].strip()
-    return (first[:70] if first else "die vorgeschlagene Maßnahme")
+    # First sentence fragment as generic measure label (current thesis only).
+    thesis = public_scenario_thesis(text, limit=70)
+    return thesis if thesis else "die vorgeschlagene Maßnahme"
 
 
 def thesis_focus(scenario: str, *, limit: int = 4) -> list[str]:
@@ -181,6 +249,40 @@ def thesis_focus(scenario: str, *, limit: int = 4) -> list[str]:
 def contains_mobility_leak(text: str) -> bool:
     low = (text or "").lower()
     return any(m in low for m in _MOBILITY_LEAK)
+
+
+def foreign_topic_markers_for_scenario(scenario: str) -> tuple[str, ...]:
+    """Markers forbidden for this scenario (absent from thesis / wrong domain)."""
+    low = (scenario or "").lower()
+    domain = detect_topic_domain(scenario)
+    foreign: list[str] = []
+
+    def _add_if_absent(markers: tuple[str, ...]) -> None:
+        for m in markers:
+            if m not in low:
+                foreign.append(m)
+
+    # BGE vocabulary never on non-income theses (core 7.3.1 leak).
+    if domain != "income":
+        _add_if_absent(_BGE_ONLY_MARKERS)
+    if domain != "labor":
+        _add_if_absent(_LABOR_ONLY_MARKERS)
+    if domain != "mobility":
+        _add_if_absent(_MOBILITY_ONLY_MARKERS)
+    _add_if_absent(_HOUSING_ONLY_MARKERS)
+    _add_if_absent(_EDU_ONLY_MARKERS)
+    _add_if_absent(_TAX_ONLY_MARKERS)
+    return tuple(dict.fromkeys(foreign))
+
+
+def contains_foreign_topic_leak(scenario: str, text: str) -> bool:
+    """True if ``text`` injects a topic family absent from ``scenario``."""
+    low = (text or "").lower()
+    scen = (scenario or "").lower()
+    for marker in foreign_topic_markers_for_scenario(scenario):
+        if marker in low and marker not in scen:
+            return True
+    return False
 
 
 def synthetic_tag() -> str:
@@ -239,7 +341,7 @@ def build_public_seed_content(
     *,
     language: str = "de",
 ) -> str:
-    """Public seed post — scenario discussion impulse only (no goal/ID/style)."""
+    """Public seed post — current thesis only (no prior-topic / goal / ID leak)."""
     thesis = public_scenario_thesis(scenario)
     measure = measure_label(scenario)
     lang = (language or "de").strip().lower() or "de"

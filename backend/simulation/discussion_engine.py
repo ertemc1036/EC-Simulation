@@ -166,6 +166,9 @@ class DiscussionEngine:
     _threads: list[ThreadEvent] = field(default_factory=list)
     _repetition_blocks: int = 0
     _addressed: dict[int, list[str]] = field(default_factory=dict)
+    # Evidence keys already ingested (comment:N / post:N) — re-sync must not
+    # inflate repetition_blocks (live fixture bdfb9e9d: 9 false blocks).
+    _seen_evidence: set[str] = field(default_factory=set)
 
     def clear(self) -> None:
         self._by_agent.clear()
@@ -174,6 +177,7 @@ class DiscussionEngine:
         self._threads.clear()
         self._repetition_blocks = 0
         self._addressed.clear()
+        self._seen_evidence.clear()
 
     def is_repetition(self, agent_id: int, text: str) -> bool:
         fp = argument_fingerprint(text)
@@ -195,10 +199,16 @@ class DiscussionEngine:
         text = (text or "").strip()
         if not text:
             return None
+        ev = (evidence or "").strip()
+        # Re-ingest of the same platform row is not a repetition block.
+        if ev and ev in self._seen_evidence:
+            return None
         fp = argument_fingerprint(text)
         aid = int(agent_id)
         if any(r.fingerprint == fp for r in self._by_agent.get(aid, [])):
             self._repetition_blocks += 1
+            if ev:
+                self._seen_evidence.add(ev)
             return None
         rec = ArgumentRecord(
             agent_id=aid,
@@ -208,6 +218,8 @@ class DiscussionEngine:
             evidence=evidence,
             round_n=round_n,
         )
+        if ev:
+            self._seen_evidence.add(ev)
         bucket = self._by_agent.setdefault(aid, [])
         bucket.append(rec)
         overflow = len(bucket) - self.max_history_per_agent
@@ -373,9 +385,9 @@ class DiscussionEngine:
         self._repetition_blocks += 1
         angles = (
             "Zusätzlich: messbare Pilotindikatoren vor Vollausrollung.",
-            "Ergänzend: Verteilungswirkung nach Haushaltstyp prüfen.",
-            "Ferner: Verwaltungskapazität und Auszahlungslogistik klären.",
-            "Außerdem: Wechselwirkungen mit bestehenden Transfers benennen.",
+            "Ergänzend: Verteilungswirkung nach Betroffenheit prüfen.",
+            "Ferner: Umsetzungskapazität und Betriebsabläufe klären.",
+            "Außerdem: Wechselwirkungen mit bestehenden Regeln benennen.",
             "Zugleich: regionale Unterschiede nicht pauschal ignorieren.",
         )
         extra = angles[(int(agent_id) + int(call_index)) % len(angles)]
@@ -390,7 +402,7 @@ class DiscussionEngine:
         )
         return {
             "backend": "local",
-            "quality_fix": "7.3",
+            "quality_fix": "7.3.1",
             "max_argument_history_per_agent": self.max_history_per_agent,
             "max_global_arguments": self.max_global,
             "argument_count": len(self._global),
