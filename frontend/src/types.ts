@@ -5,6 +5,9 @@ export interface AgentProfile {
   description: string
   goal: string
   style: string
+  age?: number | null
+  occupation?: string | null
+  role_label?: string | null
 }
 
 export interface ActionLogEntry {
@@ -309,11 +312,41 @@ export interface SimulationState {
   oasis_reply?: OasisReplyInfo
   scheduler?: SchedulerSnapshot
   society_overview?: SocietyOverview
+  discussion?: DiscussionSnapshot
   error: string | null
   result_path: string | null
   db_path: string | null
   started_at: string | null
   finished_at: string | null
+}
+
+export interface DiscussionThreadEvent {
+  comment_id: number
+  post_id?: number | null
+  author_id?: number | null
+  parent_comment_id?: number | null
+  recipient_id?: number | null
+  round_n?: number | null
+  self_reply?: boolean
+  snippet?: string
+}
+
+export interface DiscussionSnapshot {
+  backend?: string
+  quality_fix?: string
+  max_argument_history_per_agent?: number
+  max_global_arguments?: number
+  argument_count?: number
+  agents_with_arguments?: number
+  repetition_blocks?: number
+  thread_events?: number
+  self_replies?: number
+  cross_agent_replies?: number
+  parent_comment_id_supported?: boolean
+  oasis_nested_reply?: boolean
+  arguments?: Array<Record<string, unknown>>
+  threads?: DiscussionThreadEvent[]
+  note?: string
 }
 
 export interface HealthResponse {
@@ -387,6 +420,9 @@ export interface HealthResponse {
       scripted_scenarios_max_rounds?: number
       analytics_dashboard?: boolean
       zep_integrated?: boolean
+      intelligent_discussion?: boolean
+      individual_personas?: boolean
+      quality_fix?: string
     }
     api_key_exposed?: boolean
   }

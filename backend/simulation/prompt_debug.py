@@ -13,9 +13,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # Stable id for the EC custom prompt bundle (system + decision templates).
-# v6 = Phase 7.2 live social dynamics (cross-agent threads, no self-reply,
-# public seed without goal leak) on v5 caps / token limits.
-PROMPT_BUNDLE_ID = "ec-custom-forum-de-v6"
+# v7 = Phase 7.3 intelligent discussion (argument pickup, anti-repetition,
+# individual personas, conditional stance) on v6 caps / token limits.
+PROMPT_BUNDLE_ID = "ec-custom-forum-de-v7"
 
 # Markers that prove OASIS stock Reddit/Twitter framing reached the client.
 OASIS_REDDIT_OBJECTIVE = "You're a Reddit user"

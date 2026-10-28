@@ -103,7 +103,7 @@ def test_limits_unchanged_20k_10_500_020_5_2(results_dir: Path):
 
 
 def test_prompt_bundle_v4_and_slim_system():
-    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v6"
+    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v7"
     sys_p = build_system_prompt(
         DEFAULT_AGENTS[0], scenario=BERLIN, language="de"
     )

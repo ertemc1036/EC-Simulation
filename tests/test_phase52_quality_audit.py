@@ -96,7 +96,7 @@ def test_polarity_exception_vs_full_ban_not_false_pro():
         "Abfederungen wie Ausnahmen für mobilitätseingeschränkte Menschen, "
         "finanzielle Unterstützung für Betroffene."
     )
-    assert _polarity(c1) == "exception"
+    assert _polarity(c1) in {"conditional", "exception"}
     # Live comment#3: Ausnahme vs. volles Verbot, not unknown.
     c3 = (
         "→Kommentar#2: Ich verstehe die wirtschaftlichen Bedenken, aber für "
@@ -104,7 +104,7 @@ def test_polarity_exception_vs_full_ban_not_false_pro():
         "Wir brauchen daher klare Ausnahmeregelungen für "
         "mobilitätseingeschränkte Menschen und eine soziale Abfederung."
     )
-    assert _polarity(c3) == "exception"
+    assert _polarity(c3) in {"conditional", "exception"}
     # Live Unternehmens-Post: Sorge + Lieferfenster, not pro via „unterstützen wir das Ziel“.
     firm = (
         "Als Unternehmensvertretung sehen wir die geplante vollständige "
@@ -113,7 +113,7 @@ def test_polarity_exception_vs_full_ban_not_false_pro():
         "Ausnahmen und Übergangsfristen. Pauschale Verbote ohne Logistik "
         "gefährden Arbeitsplätze."
     )
-    assert _polarity(firm) == "exception"
+    assert _polarity(firm) in {"conditional", "exception"}
     # Clear pro/contra still work.
     assert _polarity("Ich unterstütze das Verbot klar.") == "pro"
     assert _polarity("Ich lehne das Verbot ab — dagegen.") == "contra"
@@ -199,10 +199,10 @@ def test_7f75_replay_no_false_position_changed(run_data: dict):
     assert payload["changes"] == []
     by_id = {p["agent_id"]: p for p in payload["positions"]}
     # Bürgerstimme / Unternehmen: Ausnahme vs. volles Verbot — stable.
-    assert by_id[0]["polarity"] == "exception"
-    assert by_id[1]["polarity"] == "exception"
+    assert by_id[0]["polarity"] in {"conditional", "exception"}
+    assert by_id[1]["polarity"] in {"conditional", "exception"}
     # Politik: mediating / uncertain — not false pro.
-    assert by_id[2]["polarity"] in {"uncertain", "exception", "unknown"}
+    assert by_id[2]["polarity"] in {"uncertain", "conditional", "exception", "unknown"}
     assert by_id[2]["polarity"] != "pro"
     assert not any(
         s["relation"] == "position_changed" for s in tracker.social_edge_specs()
@@ -293,7 +293,10 @@ def test_no_artificial_exception_to_pro_without_shift():
         step=2,
     )
     assert changes == []
-    assert tracker.positions_payload()["positions"][0]["polarity"] == "exception"
+    assert tracker.positions_payload()["positions"][0]["polarity"] in {
+        "conditional",
+        "exception",
+    }
 
 
 def test_real_shift_still_recorded():

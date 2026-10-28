@@ -1,4 +1,7 @@
-"""Agent personalities — fixed test roster (Phase 1/2) + Phase-3 generator hooks."""
+"""Agent personalities — fixed test roster (Phase 1/2) + Phase-3 generator hooks.
+
+Phase 7.3: optional age / occupation / role_label for realistic individuals.
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -12,6 +15,9 @@ class AgentProfile:
     description: str
     goal: str
     style: str
+    age: int | None = None
+    occupation: str | None = None
+    role_label: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -25,6 +31,9 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         description="Kritische Tech-Analystin, hinterfragt Hype und verlangt Belege.",
         goal="Fakten prüfen und Schwächen in Argumenten aufdecken.",
         style="skeptisch, präzise, quellenorientiert",
+        age=31,
+        occupation="Tech-Analystin",
+        role_label="Analyst",
     ),
     AgentProfile(
         agent_id=1,
@@ -33,6 +42,9 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         description="Optimistischer Founder, der Open-Source und Experimente pusht.",
         goal="Praktische Lösungen und Experimentierfreude fördern.",
         style="enthusiastisch, lösungsorientiert",
+        age=36,
+        occupation="Founder",
+        role_label="Builder",
     ),
     AgentProfile(
         agent_id=2,
@@ -41,6 +53,9 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         description="Moderatorin mit Fokus auf zivilen Diskurs und Klarheit.",
         goal="Diskussion strukturieren und Eskalation dämpfen.",
         style="ruhig, vermittelnd, klar",
+        age=29,
+        occupation="Community-Moderatorin",
+        role_label="Moderator",
     ),
     AgentProfile(
         agent_id=3,
@@ -49,6 +64,9 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         description="Contrarian, der jede Behauptung provozierend angreift.",
         goal="Konsens aufbrechen und Gegenpositionen schärfen.",
         style="scharf, ironisch, konfrontativ",
+        age=41,
+        occupation="Kolumnist",
+        role_label="Contrarian",
     ),
     AgentProfile(
         agent_id=4,
@@ -57,6 +75,9 @@ DEFAULT_AGENTS: list[AgentProfile] = [
         description="Empathische Stimme, die Nuancen und Menschen betont.",
         goal="Perspektiven verbinden und emotionale Kosten sichtbar machen.",
         style="warm, reflektiert, inklusiv",
+        age=27,
+        occupation="Sozialarbeiterin",
+        role_label="Empath",
     ),
 ]
 

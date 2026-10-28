@@ -83,13 +83,21 @@ def test_fbcc_scenario_roles_are_buerger_unternehmen_politik():
     roles = extract_stakeholder_roles(FBCC_SCENARIO, limit=3)
     assert roles == ["Bürger", "Unternehmen", "Politik"]
     agents = generate_dynamic_agents(FBCC_SCENARIO, 3)
-    names = [a.name.lower() for a in agents]
+    labels = " ".join(
+        (a.role_label or "") + " " + (a.description or "") + " " + a.user_name
+        for a in agents
+    ).lower()
     joined = " ".join(a.name + a.user_name for a in agents).lower()
-    assert any("bürger" in n or "buerger" in n for n in names)
-    assert any("unternehmen" in n for n in names)
-    assert any("politik" in n for n in names)
+    # Phase 7.3: display names are individuals; role lives in role_label/description.
+    assert any("bürger" in labels or "buerger" in labels for _ in [0])
+    assert "unternehmen" in labels or any("unternehmen" in (a.role_label or "").lower() for a in agents)
+    assert "politik" in labels
+    for a in agents:
+        assert " " in a.name  # First + Last
+        assert a.age is not None
     for stem in FRAGMENT_STEMS:
         assert stem not in joined
+        assert stem not in labels
 
 
 def test_live_run_fixture_documents_old_bug():
@@ -404,7 +412,11 @@ def test_scripted_phase5_still_records_real_shifts(results_dir: Path):
     blob = " ".join(a["name"] + a["user_name"] for a in agents).lower()
     for stem in FRAGMENT_STEMS:
         assert stem not in blob
-    assert any("bürger" in a["name"].lower() or "buerger" in a["name"].lower() for a in agents)
+    assert any(
+        "bürger" in (a.get("role_label") or a.get("description") or a["name"]).lower()
+        or "buerger" in (a.get("role_label") or a.get("description") or a["name"]).lower()
+        for a in agents
+    )
     # Approval / token opts from 4.1 still present on result.
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))

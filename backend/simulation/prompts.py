@@ -68,12 +68,13 @@ Stil: {style}
 {language_instruction}
 
 # REGELN
-1. Inhalte in der angegebenen Sprache; kurze Argumente aus deiner Perspektive.
+1. Inhalte in der angegebenen Sprache; kurze Argumente aus deiner individuellen Perspektive (Name/Beruf) — keine abstrakten Gruppenlabels.
 2. Aktionen dienen deinem Ziel — nicht fremde Stakeholder mitzusammenfassen.
 3. Interaktion: create_comment(post_id) als Reply (kein parent_comment_id); bei Bezug auf Kommentar →Kommentar#id im Text; like_*/dislike_* auf Post/Kommentar-IDs; kein search/refresh wenn FEED IDs zeigt; kein doppelter Essay-Post.
 4. KEINE Self-Replies: antworte nie mit →Kommentar# auf deine eigenen Kommentar-IDs; bevorzuge Cross-Agent-Bezüge (andere Nutzer).
-5. Position halten oder begründet ändern; Runde 2+: Thread fortsetzen (→Kommentar# fremd) und/oder like_comment/dislike_comment.
-6. Tool-Calling only; in Rolle bleiben; keine erfundenen Posts/Kommentare ohne Tool-Call.
+5. Intelligent diskutieren: greife fremde Argumente auf; wiederhole nicht dieselben Punkte; keine erfundenen Studien/URLs/Quellen.
+6. Position (pro/contra/bedingt/unsicher) halten oder mit Beleg ändern; Runde 2+: Thread fortsetzen (→Kommentar# fremd) und/oder like_comment/dislike_comment.
+7. Tool-Calling only; in Rolle bleiben; keine erfundenen Posts/Kommentare ohne Tool-Call.
 """
 )
 
@@ -317,12 +318,14 @@ def build_decision_prompt(
     include_env: bool | None = None,
     round_number: int | None = None,
     position_context: str | None = None,
+    argument_context: str | None = None,
 ) -> str:
     """Per-decision user message — slim; system prompt already has persona/scenario.
 
     Phase 4.1: scenario/goal only as short anchors (not full re-essay), drop OASIS
     env body when FEED-KONTEXT already carries IDs (env duplicates posts + noise).
     Phase 5: R2+ pushes comment reactions + local →Kommentar# refs; position line.
+    Phase 7.3: argument_context — anti-repetition + pickup hints (bounded).
     """
     lang = normalize_language(language)
     lang_name = LANGUAGE_NAMES[lang]
@@ -351,16 +354,19 @@ def build_decision_prompt(
             "like_comment/dislike_comment auf fremde Kommentar#; "
             "oder create_comment(post_id) mit →Kommentar#id auf FREMDE Kommentare "
             "(kein Self-Reply, kein parent_comment_id); "
-            "Argument mit Bezug + eigener Perspektive; Position halten/ändern."
+            "fremdes Argument aufgreifen, nicht wiederholen; Position halten/ändern."
         )
     else:
         interact = (
-            "INTERAKTIONSKONTEXT: create_comment(post_id) mit klarem Argument "
-            "aus deiner Rolle; optional like_*/dislike_*; "
-            "kein search/refresh, kein doppelter Essay, kein Goal-/Stil-Dump."
+            "INTERAKTIONSKONTEXT: create_comment(post_id) mit klarem neuem Argument "
+            "aus deiner Person; optional like_*/dislike_*; "
+            "kein search/refresh, kein doppelter Essay, kein Goal-/Stil-Dump, "
+            "keine erfundenen Quellen."
         )
     pos = (position_context or "").strip()
     pos_line = f"\nPOSITION: {pos[:160]}" if pos else ""
+    arg = (argument_context or "").strip()
+    arg_line = f"\nARGUMENT-KONTEXT:\n{arg[:220]}" if arg else ""
     return (
         f"Entscheide jetzt als {agent_name}.\n"
         f"Szenario: {scenario_anchor}\n"
@@ -368,7 +374,8 @@ def build_decision_prompt(
         f"Sprache: {lang_name} ({lang}).\n"
         f"Runde: {round_n}.\n"
         f"{interact}"
-        f"{pos_line}\n"
+        f"{pos_line}"
+        f"{arg_line}\n"
         f"FEED-KONTEXT (verbindliche post_ids / comment_ids):\n{feed}\n"
         f"MEMORY-KONTEXT:\n{memory}"
         f"{env_block}"

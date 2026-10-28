@@ -318,3 +318,38 @@ class LocalAgentMemory:
                     "changed": bool(pos.get("changed")),
                 },
             )
+
+    def remember_argument_development(
+        self,
+        agent_id: int,
+        *,
+        snippet: str,
+        evidence: str,
+        step: int | None = None,
+        addressed_evidence: str | None = None,
+        polarity: str | None = None,
+    ) -> bool:
+        """Phase 7.3: sourced argument-development fact (no invented memories)."""
+        text = (snippet or "").strip()
+        evid = (evidence or "").strip()
+        if not text or not evid or ":" not in evid:
+            return False
+        sources = [evid]
+        if addressed_evidence and ":" in addressed_evidence:
+            sources.append(addressed_evidence)
+        bits = [f"Argument: {text[:160]}"]
+        if polarity:
+            bits.append(f"Polarität={polarity}")
+        if addressed_evidence:
+            bits.append(f"greift {addressed_evidence} auf")
+        return self.remember_long_term(
+            int(agent_id),
+            text=" · ".join(bits)[:280],
+            step=step,
+            sources=sources[:6],
+            meta={
+                "tier": "long_term",
+                "kind": "argument_development",
+                "polarity": polarity,
+            },
+        )
