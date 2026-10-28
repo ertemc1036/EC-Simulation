@@ -14,7 +14,7 @@ const mode = ref<'manual' | 'llm'>('manual')
 /** Content language for LLM agents (default DE; overrides OASIS English prompts). */
 const language = ref('de')
 const maxSteps = ref(2)
-/** Phase 3: configurable agent count (live-test ceiling 5). */
+/** Live-LLM ceiling 5; Offline/Manual presets 10/25/50. */
 const agentCount = ref(5)
 /** dynamic = scenario-derived; fixed_test = classic 5-roster (truncated). */
 const agentGeneration = ref<'dynamic' | 'fixed_test'>('dynamic')
@@ -22,6 +22,18 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 const showLlmConfirm = ref(false)
 let socket: Socket | null = null
+
+const offlinePresets = computed(() => {
+  const p = health.value?.config?.offline_scale?.presets
+  return Array.isArray(p) && p.length ? p : [10, 25, 50]
+})
+
+const agentCountMax = computed(() => {
+  if (mode.value === 'llm') {
+    return health.value?.config?.live_test_limits?.max_agents ?? 5
+  }
+  return health.value?.config?.offline_max_agents ?? 50
+})
 
 function statusClass(status?: string) {
   if (status === 'limit_reached') return 'status-limit'
@@ -48,23 +60,97 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-5) misses positions / oasis_reply fields. */
+/** Stale Flask on :5001 (pre-Phase-6) misses society / offline_scale fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
-  const phaseOk = phase === '5' || phase.startsWith('5')
+  const phaseOk = phase === '6' || phase.startsWith('6') || phase.startsWith('5')
   const hasRevision = Boolean(h.runtime?.code_revision)
   const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
   const hasOasisReply = Boolean(h.config?.oasis_reply)
   const hasSocial = Boolean(h.config?.social_dynamics)
-  if (phaseOk && hasRevision && hasGenModes && hasOasisReply && hasSocial) return null
+  const hasOffline = Boolean(h.config?.offline_scale)
+  if (phaseOk && hasRevision && hasGenModes && hasOasisReply && hasSocial && hasOffline) {
+    return null
+  }
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 5 oder fehlende Social-Dynamics-Felder). ' +
-      'Flask auf Port 5001 neu starten, sonst fehlen Positionen / Beziehungen.',
+      'Backend wirkt veraltet (Phase ≠ 6 oder fehlende Offline-Scale-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst fehlen Society-/Netzwerk-Ansichten.',
   }
+})
+
+const executionKindLabel = computed(() => {
+  const kind = sim.value?.execution_kind
+  if (kind === 'scripted') return 'ScriptedModel (Offline)'
+  if (kind === 'live_llm') return 'Live-LLM (kostenpflichtig)'
+  if (kind === 'manual' || sim.value?.mode === 'manual') return 'ManualAction (Offline)'
+  if (sim.value?.mode === 'llm') {
+    const src = sim.value?.model_calls?.[0]?.source
+    if (src === 'scripted_test') return 'ScriptedModel (Offline)'
+    return 'LLMAction'
+  }
+  return '—'
+})
+
+const societyOverview = computed(() => {
+  const o = sim.value?.society_overview
+  if (o && typeof o.agent_count === 'number') return o
+  const pos = sim.value?.agent_positions
+  const g = sim.value?.knowledge_graph
+  if (!pos && !g) return null
+  return {
+    agent_count: pos?.agent_count ?? sim.value?.agent_count ?? 0,
+    step: sim.value?.step,
+    posts: sim.value?.posts?.length ?? 0,
+    comments: sim.value?.comments?.length ?? 0,
+    reactions: sim.value?.reactions?.length ?? 0,
+    polarity_distribution: pos?.polarity_distribution || {},
+    change_count: pos?.change_count ?? 0,
+    social_relations: g?.social_relations || {},
+    network: g?.network || {},
+    execution_kind: sim.value?.execution_kind,
+    live_llm_max_agents: 5,
+    offline_max_agents: 50,
+    paid_llm_unlocked_for_scale: false,
+    scheduler_plans: sim.value?.scheduler?.plans ?? 0,
+    self_as_partner_count: sim.value?.scheduler?.self_as_partner_count ?? 0,
+  }
+})
+
+const polarityBars = computed(() => {
+  const dist = societyOverview.value?.polarity_distribution || {}
+  const entries = Object.entries(dist)
+  const total = entries.reduce((s, [, n]) => s + n, 0) || 1
+  return entries.map(([label, n]) => ({
+    label,
+    count: n,
+    pct: Math.round((n / total) * 100),
+  }))
+})
+
+const networkActors = computed(() => {
+  const nodes = sim.value?.knowledge_graph?.nodes || []
+  return nodes.filter((n) => n.kind === 'actor').slice(0, 40)
+})
+
+const networkEdges = computed(() => {
+  const edges = sim.value?.knowledge_graph?.edges || []
+  return edges
+    .filter((e) =>
+      ['agrees_with', 'disagrees_with', 'responds_to', 'influenced_by', 'position_changed'].includes(
+        e.relation,
+      ),
+    )
+    .slice(0, 48)
+})
+
+const progressPct = computed(() => {
+  const s = sim.value
+  if (!s?.max_steps) return 0
+  return Math.min(100, Math.round((100 * (s.step || 0)) / s.max_steps))
 })
 
 /** Explicit stop reason for limit_reached / failed — always visible when set. */
@@ -95,14 +181,35 @@ const oasisReplyNote = computed(() => {
   }
 })
 
+function applyPreset(n: number) {
+  const max = agentCountMax.value
+  agentCount.value = Math.max(1, Math.min(n, max))
+  if (mode.value === 'llm' && agentCount.value > 5) {
+    agentCount.value = 5
+  }
+  if (n > 5) {
+    agentGeneration.value = 'dynamic'
+  }
+  void refreshAgents()
+}
+
+function onModeChange() {
+  if (mode.value === 'llm' && agentCount.value > 5) {
+    agentCount.value = 5
+    void refreshAgents()
+  }
+}
+
 const llmConfirmSummary = computed(() => {
   const cfg = health.value?.config
-  const nAgents =
+  const nAgents = Math.min(
     sim.value?.agent_count ||
-    agentCount.value ||
-    agents.value.length ||
-    cfg?.max_agents ||
-    5
+      agentCount.value ||
+      agents.value.length ||
+      cfg?.max_agents ||
+      5,
+    cfg?.live_test_limits?.max_agents ?? 5,
+  )
   const rounds = Math.min(maxSteps.value || 2, cfg?.max_simulation_steps ?? 2)
   const callLimit = cfg?.max_llm_calls_per_run ?? 10
   const model = cfg?.openai_model ?? '—'
@@ -263,8 +370,8 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-4 Multi-Agent Interaction Engine in einer echten camel-oasis-
-        Umgebung — Kontext, Konflikte, Memory und belegte Relationen live.
+        Phase-6 skalierbare Multi-Agenten-Gesellschaft (Offline 10/25/50) —
+        OASIS, Scheduler, Positionen und belegte Relationen. Live-LLM bleibt ≤5.
       </p>
     </header>
 
@@ -296,9 +403,9 @@ onUnmounted(() => {
       <div class="row">
         <label>
           Modus
-          <select v-model="mode">
-            <option value="manual">manual (StubModel, keine LLM-Calls) — Standard</option>
-            <option value="llm">llm (benötigt Freigabe + API-Key im Backend-.env)</option>
+          <select v-model="mode" @change="onModeChange">
+            <option value="manual">manual (StubModel, Offline-Scale) — Standard</option>
+            <option value="llm">llm (Freigabe + API-Key; Ceiling 5 Agenten)</option>
           </select>
         </label>
         <label>
@@ -313,7 +420,13 @@ onUnmounted(() => {
         </label>
         <label>
           Agenten
-          <input v-model.number="agentCount" type="number" min="1" max="5" @change="refreshAgents" />
+          <input
+            v-model.number="agentCount"
+            type="number"
+            min="1"
+            :max="agentCountMax"
+            @change="refreshAgents"
+          />
         </label>
         <label>
           Generierung
@@ -324,12 +437,34 @@ onUnmounted(() => {
         </label>
         <label>
           Schritte
-          <input v-model.number="maxSteps" type="number" min="1" max="2" />
+          <input
+            v-model.number="maxSteps"
+            type="number"
+            min="1"
+            :max="mode === 'llm' ? 2 : 4"
+          />
         </label>
         <button class="cta" :disabled="busy || sim?.status === 'running'" @click="requestStart">
           {{ sim?.status === 'running' ? 'Läuft…' : 'Simulation starten' }}
         </button>
       </div>
+      <div class="preset-row" v-if="mode === 'manual'">
+        <span class="k">Offline-Presets</span>
+        <button
+          v-for="n in offlinePresets"
+          :key="n"
+          type="button"
+          class="preset"
+          :class="{ active: agentCount === n }"
+          @click="applyPreset(n)"
+        >
+          {{ n }}
+        </button>
+        <span class="muted lede-sm">nur Manual/Scripted — nicht für Live-LLM</span>
+      </div>
+      <p v-if="mode === 'llm'" class="lede-sm muted">
+        Live-LLM-Ceilings unverändert: 5 Agenten / 2 Runden / 10 Calls / 20k Tokens / $0.20.
+      </p>
       <p v-if="error" class="err">{{ error }}</p>
     </section>
 
@@ -388,9 +523,22 @@ onUnmounted(() => {
       </div>
       <div>
         <span class="k">Modus</span>
-        <span class="v mode-pill" :class="sim.mode === 'llm' ? 'mode-llm' : 'mode-manual'">
-          {{ sim.mode === 'llm' ? 'LLMAction' : 'ManualAction' }}
+        <span
+          class="v mode-pill"
+          :class="
+            sim.execution_kind === 'scripted'
+              ? 'mode-scripted'
+              : sim.mode === 'llm'
+                ? 'mode-llm'
+                : 'mode-manual'
+          "
+        >
+          {{ executionKindLabel }}
         </span>
+      </div>
+      <div>
+        <span class="k">Progress</span>
+        <span class="v">{{ progressPct }}%</span>
       </div>
       <div>
         <span class="k">Sprache</span>
@@ -564,6 +712,79 @@ onUnmounted(() => {
           <li>Agent-Gen-Default: {{ health.config.default_agent_generation || '—' }}</li>
           <li>Ergebnis: {{ sim?.result_path || '—' }}</li>
         </ul>
+      </div>
+    </section>
+
+    <section class="society" v-if="societyOverview">
+      <h2>Society-Übersicht</h2>
+      <p class="lede-sm">
+        {{ societyOverview.agent_count }} Agenten ·
+        Ausführung: {{ executionKindLabel }} ·
+        Live-LLM-Max {{ societyOverview.live_llm_max_agents ?? 5 }} ·
+        Offline-Max {{ societyOverview.offline_max_agents ?? 50 }}
+        <span v-if="societyOverview.paid_llm_unlocked_for_scale === false">
+          · Scale ≠ bezahltes LLM
+        </span>
+      </p>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-fill" :style="{ width: progressPct + '%' }" />
+      </div>
+      <div class="society-grid">
+        <div>
+          <span class="k">Posts</span>
+          <span class="v">{{ societyOverview.posts ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Kommentare</span>
+          <span class="v">{{ societyOverview.comments ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Reaktionen</span>
+          <span class="v">{{ societyOverview.reactions ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Positionswechsel</span>
+          <span class="v">{{ societyOverview.change_count ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Scheduler-Pläne</span>
+          <span class="v">{{ societyOverview.scheduler_plans ?? sim?.scheduler?.plans ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Selbst-als-Partner</span>
+          <span class="v">{{ societyOverview.self_as_partner_count ?? 0 }}</span>
+        </div>
+      </div>
+
+      <h3>Positionsverteilung</h3>
+      <ul class="polarity-bars" v-if="polarityBars.length">
+        <li v-for="b in polarityBars" :key="b.label">
+          <span class="pol-label">{{ b.label }}</span>
+          <span class="pol-track">
+            <span class="pol-fill" :style="{ width: b.pct + '%' }" />
+          </span>
+          <span class="pol-count mono">{{ b.count }} ({{ b.pct }}%)</span>
+        </li>
+      </ul>
+      <p v-else class="empty">Noch keine Polaritätsverteilung.</p>
+
+      <h3>Netzwerk</h3>
+      <p class="lede-sm" v-if="sim?.knowledge_graph?.network">
+        {{ sim.knowledge_graph.network.actors ?? 0 }} Akteure ·
+        {{ sim.knowledge_graph.network.statements ?? 0 }} Aussagen ·
+        {{ sim.knowledge_graph.network.social_edges ?? 0 }} Social-Kanten
+      </p>
+      <div class="network-panel">
+        <ul class="network-actors">
+          <li v-for="a in networkActors" :key="a.id">{{ a.label }}</li>
+        </ul>
+        <ol class="log network-edges" v-if="networkEdges.length">
+          <li v-for="e in networkEdges" :key="e.id">
+            <span class="mono">{{ e.relation }}</span>
+            · {{ e.source }} → {{ e.target }}
+          </li>
+        </ol>
+        <p v-else class="empty">Noch keine Social-Kanten.</p>
       </div>
     </section>
 
@@ -875,6 +1096,144 @@ input {
 .mode-pill.mode-manual,
 .badge.src-manual {
   color: var(--warn);
+}
+
+.mode-pill.mode-scripted {
+  color: #9fd4ff;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.preset {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.25rem 0.7rem;
+  border-radius: 4px;
+}
+
+.preset.active,
+.preset:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.society {
+  margin: 1.5rem 0;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  animation: rise 0.55s ease both;
+}
+
+.society h2 {
+  margin: 0 0 0.35rem;
+}
+
+.society h3 {
+  margin: 1.1rem 0 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.society-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.progress-track {
+  height: 6px;
+  margin-top: 0.65rem;
+  background: rgba(232, 242, 236, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.35s ease;
+}
+
+.polarity-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.polarity-bars li {
+  display: grid;
+  grid-template-columns: 7rem 1fr 5.5rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pol-track {
+  height: 8px;
+  background: rgba(232, 242, 236, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pol-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #7fb89a, var(--accent));
+}
+
+.pol-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.pol-count {
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.network-panel {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.35fr) 1fr;
+  gap: 0.85rem;
+}
+
+.network-actors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.network-actors li {
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.network-edges {
+  max-height: 220px;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .network-panel {
+    grid-template-columns: 1fr;
+  }
+  .polarity-bars li {
+    grid-template-columns: 1fr;
+  }
 }
 
 .badge {

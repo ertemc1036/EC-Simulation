@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
 # Absolute live-test ceilings — env may be lower, never higher.
+# Phase 6: these stay fixed for paid Live-LLM; 10/25/50 is Offline/Scripted only.
 LIVE_TEST_MAX_AGENTS = 5
 LIVE_TEST_MAX_ROUNDS = 2
 LIVE_TEST_MAX_LLM_CALLS = 10
@@ -18,6 +19,12 @@ LIVE_TEST_MAX_RETRIES = 0
 # Concurrent in-flight LLM calls inside one round (OASIS gather + semaphore).
 # Default 1: serialize model calls so token reservations cannot race.
 LIVE_TEST_MAX_PARALLEL_LLM_CALLS = 1
+
+# Offline / Scripted society scale (Phase 6) — never unlocks paid Live-LLM.
+OFFLINE_MAX_AGENTS = 50
+OFFLINE_SCALE_PRESETS = (10, 25, 50)
+# Manual/scripted may use more rounds than live; live still clamps to 2.
+OFFLINE_MAX_ROUNDS = 4
 
 COST_ESTIMATE_DISCLAIMER = (
     "Kostenschätzung auf Basis der konfigurierten USD/1M-Preise; "
@@ -73,6 +80,7 @@ class Settings:
     agent_memory_window: int
     agent_local_memory_entries: int
     max_agents: int
+    offline_max_agents: int
     default_agent_count: int
     default_agent_generation: str
     price_input_per_1m: float
@@ -140,6 +148,7 @@ class Settings:
             "openai_base_url": self.openai_base_url,
             "openai_model": self.openai_model,
             "max_agents": self.max_agents,
+            "offline_max_agents": self.offline_max_agents,
             "default_agent_count": self.default_agent_count,
             "default_agent_generation": self.default_agent_generation,
             "agent_generation_modes": ["dynamic", "fixed_test"],
@@ -162,7 +171,9 @@ class Settings:
             "model_calls_budget_note": (
                 f"{self.max_agents} Agenten × Runden ≤ "
                 f"MAX_LLM_CALLS_PER_RUN ({self.max_llm_calls_per_run}); "
-                "Seed-ManualAction kostet 0 Calls."
+                "Seed-ManualAction kostet 0 Calls. "
+                f"Offline/Scripted Society: bis {self.offline_max_agents} Agenten "
+                f"(Presets {list(OFFLINE_SCALE_PRESETS)}) — nicht für Live-LLM."
             ),
             "live_test_limits": {
                 "max_agents": LIVE_TEST_MAX_AGENTS,
@@ -170,6 +181,19 @@ class Settings:
                 "max_model_calls": LIVE_TEST_MAX_LLM_CALLS,
                 "max_retries": LIVE_TEST_MAX_RETRIES,
                 "max_parallel_llm_calls": LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+                "max_tokens_per_run": 20_000,
+                "max_tokens_per_call": 500,
+                "max_cost_usd_per_run": 0.20,
+            },
+            "offline_scale": {
+                "max_agents": OFFLINE_MAX_AGENTS,
+                "presets": list(OFFLINE_SCALE_PRESETS),
+                "max_rounds": OFFLINE_MAX_ROUNDS,
+                "paid_llm_unlocked": False,
+                "note": (
+                    "10/25/50 nur Manual/Scripted offline — "
+                    "Live-LLM-Ceilings bleiben 5/2/10/20k/500/$0.20."
+                ),
             },
             "terminal_statuses": ["completed", "limit_reached", "failed"],
             "zep_enabled": self.zep_enabled,
@@ -179,7 +203,7 @@ class Settings:
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
-            "phase": "5",
+            "phase": "6",
             "oasis_reply": {
                 "parent_comment_id_supported": False,
                 "reply_via": "create_comment(post_id, content)",
@@ -199,6 +223,8 @@ class Settings:
                     "influenced_by",
                     "position_changed",
                 ],
+                "scheduler": True,
+                "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
             },
         }
 
@@ -249,7 +275,9 @@ def load_settings() -> Settings:
         llm_max_retries=max_retries,
         agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
         agent_local_memory_entries=max(1, _int("AGENT_LOCAL_MEMORY_ENTRIES", 12)),
+        # max_agents = Live-LLM ceiling (unchanged). Offline scale is separate.
         max_agents=LIVE_TEST_MAX_AGENTS,
+        offline_max_agents=OFFLINE_MAX_AGENTS,
         default_agent_count=min(
             max(1, _int("DEFAULT_AGENT_COUNT", LIVE_TEST_MAX_AGENTS)),
             LIVE_TEST_MAX_AGENTS,

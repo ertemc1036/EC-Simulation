@@ -96,6 +96,7 @@ def test_live_run_fixture_documents_old_bug():
     """Offline fixture still shows the pre-fix failure mode (documentation)."""
     assert LIVE_RUN.is_file(), f"missing regression fixture {LIVE_RUN}"
     data = json.loads(LIVE_RUN.read_text(encoding="utf-8"))
+    # Fixture is a historical Phase-5.1 live dump — phase stamp stays 5.
     assert data["meta"]["phase"] == 5
     names = " ".join(a["name"] for a in data["agents"]).lower()
     assert "aufkonkrete" in names or "obzustimmung" in names

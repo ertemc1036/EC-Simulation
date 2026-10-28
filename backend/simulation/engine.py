@@ -32,6 +32,9 @@ from backend.config import (
     LIVE_TEST_MAX_LLM_CALLS,
     LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
     LIVE_TEST_MAX_ROUNDS,
+    OFFLINE_MAX_AGENTS,
+    OFFLINE_MAX_ROUNDS,
+    OFFLINE_SCALE_PRESETS,
     Settings,
     settings as default_settings,
 )
@@ -47,6 +50,8 @@ from backend.simulation.prompt_debug import (
     PromptDebugBuffer,
     action_dedup_key,
 )
+from backend.simulation.scripted_model import ScriptedReactiveModel
+from backend.simulation.social_scheduler import SocialInteractionScheduler
 from backend.simulation.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
     build_decision_prompt,
@@ -190,6 +195,9 @@ class SimulationState:
     knowledge_graph: dict[str, Any] = field(default_factory=dict)
     interaction_summary: dict[str, Any] = field(default_factory=dict)
     oasis_reply: dict[str, Any] = field(default_factory=dict)
+    scheduler: dict[str, Any] = field(default_factory=dict)
+    society_overview: dict[str, Any] = field(default_factory=dict)
+    execution_kind: str = "manual"  # manual | scripted | live_llm
     error: str | None = None
     result_path: str | None = None
     db_path: str | None = None
@@ -201,6 +209,7 @@ class SimulationState:
             "run_id": self.run_id,
             "status": self.status,
             "mode": self.mode,
+            "execution_kind": self.execution_kind,
             "scenario": self.scenario,
             "language": self.language,
             "step": self.step,
@@ -223,6 +232,8 @@ class SimulationState:
             "knowledge_graph": self.knowledge_graph,
             "interaction_summary": self.interaction_summary,
             "oasis_reply": self.oasis_reply,
+            "scheduler": self.scheduler,
+            "society_overview": self.society_overview,
             "error": self.error,
             "result_path": self.result_path,
             "db_path": self.db_path,
@@ -262,12 +273,29 @@ class SimulationEngine:
         )
         self._knowledge_graph = LocalKnowledgeGraph()
         self._positions = PositionTracker()
+        self._scheduler = SocialInteractionScheduler()
         self._run_language: str = "de"
         self._run_scenario: str = ""
         self._agent_generation: str = "dynamic"
+        self._execution_kind: str = "manual"
         self._limit_stop: bool = False
         self._failed: bool = False
         self._custom_prompts_verified: bool = False
+
+    def _is_offline_scripted(self) -> bool:
+        """Test injection / ScriptedReactiveModel — never paid OpenAI."""
+        return self._model_factory is not None
+
+    def _agent_ceiling(self, *, mode: str) -> int:
+        """Live-LLM stays at 5; manual + scripted may scale to OFFLINE_MAX_AGENTS."""
+        if mode == "llm" and not self._is_offline_scripted():
+            return LIVE_TEST_MAX_AGENTS
+        return OFFLINE_MAX_AGENTS
+
+    def _round_ceiling(self, *, mode: str) -> int:
+        if mode == "llm" and not self._is_offline_scripted():
+            return LIVE_TEST_MAX_ROUNDS
+        return max(LIVE_TEST_MAX_ROUNDS, OFFLINE_MAX_ROUNDS)
 
     def add_listener(self, cb: EventCallback) -> None:
         self._listeners.append(cb)
@@ -284,19 +312,57 @@ class SimulationEngine:
         with self._lock:
             return self.state.to_dict()
 
-    def _new_tracker(self) -> CostTracker:
+    def _new_tracker(
+        self, *, n_agents: int = 5, steps: int = 2
+    ) -> CostTracker:
+        n = max(1, int(n_agents))
+        steps_n = max(1, int(steps))
+        # Live paid LLM: hard ceilings unchanged (5×2≤10 / 20k / $0.20).
+        if not self._is_offline_scripted():
+            return CostTracker(
+                max_calls=min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS),
+                max_tokens=self.cfg.max_tokens_per_run,
+                price_input_per_1m=self.cfg.price_input_per_1m,
+                price_output_per_1m=self.cfg.price_output_per_1m,
+                max_cost_usd=self.cfg.max_cost_usd_per_run,
+                model_name=self.cfg.openai_model,
+                max_tokens_per_call=self.cfg.max_tokens_per_call,
+                max_parallel_calls=min(
+                    self.cfg.max_parallel_llm_calls,
+                    LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+                ),
+            )
+        # Scripted with N≤5: keep configured ceilings so Approval/Reserve/Limit
+        # regressions (Call-Limit=2, Token-Overshoot, …) still fire.
+        if n <= LIVE_TEST_MAX_AGENTS:
+            return CostTracker(
+                max_calls=min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS),
+                max_tokens=self.cfg.max_tokens_per_run,
+                price_input_per_1m=self.cfg.price_input_per_1m,
+                price_output_per_1m=self.cfg.price_output_per_1m,
+                max_cost_usd=self.cfg.max_cost_usd_per_run,
+                model_name="scripted-reactive",
+                max_tokens_per_call=self.cfg.max_tokens_per_call,
+                max_parallel_calls=min(
+                    self.cfg.max_parallel_llm_calls,
+                    LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+                ),
+            )
+        # Scripted society scale (10/25/50): budget for full N×rounds, no paid API.
+        needed_calls = max(1, n * steps_n)
+        needed_tokens = max(
+            self.cfg.max_tokens_per_run,
+            needed_calls * max(80, self.cfg.max_tokens_per_call),
+        )
         return CostTracker(
-            max_calls=min(self.cfg.max_llm_calls_per_run, LIVE_TEST_MAX_LLM_CALLS),
-            max_tokens=self.cfg.max_tokens_per_run,
+            max_calls=needed_calls,
+            max_tokens=needed_tokens,
             price_input_per_1m=self.cfg.price_input_per_1m,
             price_output_per_1m=self.cfg.price_output_per_1m,
-            max_cost_usd=self.cfg.max_cost_usd_per_run,
-            model_name=self.cfg.openai_model,
+            max_cost_usd=max(self.cfg.max_cost_usd_per_run, 999.0),
+            model_name="scripted-reactive",
             max_tokens_per_call=self.cfg.max_tokens_per_call,
-            max_parallel_calls=min(
-                self.cfg.max_parallel_llm_calls,
-                LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
-            ),
+            max_parallel_calls=min(max(8, self.cfg.max_parallel_llm_calls), n),
         )
 
     def _is_busy(self) -> bool:
@@ -378,14 +444,20 @@ class SimulationEngine:
                     "error": "agent_count muss eine Zahl sein.",
                     "state": self.state.to_dict(),
                 }
-            n_agents = max(1, min(n_agents, self.cfg.max_agents, LIVE_TEST_MAX_AGENTS))
+            # Ceiling depends on path: Live-LLM ≤5; Manual/Scripted ≤50.
+            agent_cap = self._agent_ceiling(mode=requested)
+            n_agents = max(1, min(n_agents, agent_cap))
+            # Live paid LLM never exceeds LIVE_TEST_MAX_AGENTS even if mis-set.
+            if requested == "llm" and not self._is_offline_scripted():
+                n_agents = min(n_agents, LIVE_TEST_MAX_AGENTS)
             # fixed_test always uses the classic 5-roster truncated to n_agents;
             # dashboard "Testmodus" typically requests count=5.
+            # dynamic may scale to offline presets 10/25/50.
             run_agents = generate_agents(
                 scenario.strip(),
                 n_agents,
                 mode=gen_mode,
-                max_agents=LIVE_TEST_MAX_AGENTS,
+                max_agents=agent_cap,
             )
             agent_dicts = [a.to_dict() for a in run_agents]
 
@@ -438,7 +510,12 @@ class SimulationEngine:
             effective = requested
 
             steps = max_steps or self.cfg.max_simulation_steps
-            steps = max(1, min(steps, self.cfg.max_simulation_steps, LIVE_TEST_MAX_ROUNDS))
+            round_cap = self._round_ceiling(mode=effective)
+            # Live paid LLM always ≤ LIVE_TEST_MAX_ROUNDS; offline may use OFFLINE_MAX_ROUNDS.
+            if effective == "llm" and not self._is_offline_scripted():
+                steps = max(1, min(steps, self.cfg.max_simulation_steps, LIVE_TEST_MAX_ROUNDS))
+            else:
+                steps = max(1, min(steps, round_cap))
 
             run_id = (
                 datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -449,12 +526,21 @@ class SimulationEngine:
             db_path = self.cfg.results_dir / f"{run_id}.db"
 
             calls_per_round = model_calls_required_per_round(len(run_agents))
+            if self._is_offline_scripted():
+                exec_kind = "scripted"
+            elif effective == "llm":
+                exec_kind = "live_llm"
+            else:
+                exec_kind = "manual"
+            self._execution_kind = exec_kind
+
             if effective == "llm":
                 if self._model_factory is not None:
                     message = (
-                        "LLM-Modus (Test-Injection): echte OASIS LLMAction, "
+                        "ScriptedModel (Offline): echte OASIS LLMAction, "
                         "kein kostenpflichtiger Provider-Call. Freigabe bestätigt. "
-                        f"Sprache={sim_lang}. Agenten={len(run_agents)} ({gen_mode})."
+                        f"Sprache={sim_lang}. Agenten={len(run_agents)} ({gen_mode}). "
+                        f"Scale-Presets={list(OFFLINE_SCALE_PRESETS)}."
                     )
                 else:
                     est = self.cfg.estimate_max_run_cost_usd(rounds=steps)
@@ -469,13 +555,15 @@ class SimulationEngine:
                         f"{steps} Runden / retries={self.cfg.llm_max_retries} / "
                         f"~{calls_per_round} Modellaufrufe/Runde / "
                         f"geschätzte max. Kosten ~${est:.4f} "
-                        "(Provider-Abrechnung kann abweichen)."
+                        "(Provider-Abrechnung kann abweichen). "
+                        "Live-LLM-Ceiling: max 5 Agenten."
                     )
             else:
                 message = (
                     "ManualAction-Modus: echte OASIS-Umgebung mit StubModel — "
                     "keine LLM-API-Calls. "
                     f"Sprache={sim_lang}. Agenten={len(run_agents)} ({gen_mode}). "
+                    f"Offline-Scale bis {OFFLINE_MAX_AGENTS}. "
                     + (
                         "OPENAI_API_KEY fehlt."
                         if not self.cfg.llm_configured
@@ -483,7 +571,7 @@ class SimulationEngine:
                     )
                 )
 
-            self._tracker = self._new_tracker()
+            self._tracker = self._new_tracker(n_agents=len(run_agents), steps=steps)
             self._prompt_debug = PromptDebugBuffer()
             self._local_memory = LocalAgentMemory(
                 max_entries_per_agent=self.cfg.agent_local_memory_entries
@@ -491,6 +579,8 @@ class SimulationEngine:
             self._knowledge_graph = LocalKnowledgeGraph()
             self._positions = PositionTracker()
             self._positions.seed_from_goals(run_agents, step=0)
+            self._scheduler = SocialInteractionScheduler(scenario=scenario.strip())
+            ScriptedReactiveModel.shared_scheduler = self._scheduler
             self._limit_stop = False
             self._failed = False
             self._custom_prompts_verified = False
@@ -500,10 +590,19 @@ class SimulationEngine:
             self._run_agents = run_agents
             self._agent_profiles = {p.agent_id: p for p in run_agents}
             reply_meta = oasis_reply_status()
+            overview = {
+                "agent_count": len(run_agents),
+                "presets": list(OFFLINE_SCALE_PRESETS),
+                "execution_kind": exec_kind,
+                "live_llm_max_agents": LIVE_TEST_MAX_AGENTS,
+                "offline_max_agents": OFFLINE_MAX_AGENTS,
+                "paid_llm_unlocked_for_scale": False,
+            }
             self.state = SimulationState(
                 run_id=run_id,
                 status="running",
                 mode=effective,
+                execution_kind=exec_kind,
                 scenario=scenario.strip(),
                 language=sim_lang,
                 max_steps=steps,
@@ -517,6 +616,8 @@ class SimulationEngine:
                 knowledge_graph=self._knowledge_graph.to_dict(),
                 interaction_summary=_empty_interaction_summary(),
                 oasis_reply=reply_meta,
+                scheduler=self._scheduler.summary(),
+                society_overview=overview,
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -561,16 +662,19 @@ class SimulationEngine:
         os.environ["OASIS_DB_PATH"] = str(db_path)
 
         graph = self._build_agent_graph(mode, scenario=scenario, language=language)
-        # OASIS defaults semaphore=128 (all agents race). Cap to live-test
-        # parallel ceiling so model calls serialize with token reservations.
-        parallel = max(
-            1,
-            min(
-                self.cfg.max_parallel_llm_calls,
-                LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
-                LIVE_TEST_MAX_AGENTS,
-            ),
-        )
+        # Live-LLM / small scripted: serialize (parallel=1). Large scripted scale: higher.
+        n_run = len(self._run_agents) or 1
+        if self._is_offline_scripted() and n_run > LIVE_TEST_MAX_AGENTS:
+            parallel = max(1, min(8, n_run))
+        else:
+            parallel = max(
+                1,
+                min(
+                    self.cfg.max_parallel_llm_calls,
+                    LIVE_TEST_MAX_PARALLEL_LLM_CALLS,
+                    LIVE_TEST_MAX_AGENTS,
+                ),
+            )
         env = oasis.make(
             agent_graph=graph,
             platform=DefaultPlatformType.REDDIT,
@@ -650,15 +754,16 @@ class SimulationEngine:
                 stop_reason = "all_rounds_finished_budget_exhausted"
             msg_prefix = f"Abgeschlossen ({self.state.mode})."
 
+        # Write JSON with the final status, then publish status+result_path together
+        # so pollers never observe a terminal status without a result file (N=50 race).
         with self._lock:
-            self.state.status = status
             self.state.stop_reason = stop_reason
             self.state.finished_at = _utc_now()
-
-        result_path = self._persist_results(db_path)
+        result_path = self._persist_results(db_path, status=status, stop_reason=stop_reason)
         with self._lock:
             self.state.result_path = str(result_path)
             self.state.message = f"{msg_prefix} Ergebnisse: {result_path.name}."
+            self.state.status = status
         self._emit("completed" if status == STATUS_COMPLETED else status)
 
     def _build_inner_model(self, mode: str, agent_id: int) -> BaseModelBackend:
@@ -1037,11 +1142,15 @@ class SimulationEngine:
                     self.state.stop_reason = self.state.message
                 self._sync_cost_to_state()
                 break
-            # One parallel sim only; within a round, cap agents by remaining calls
-            # and live-test agent ceiling (5 × 2 ≤ 10 calls).
+            # Live-LLM: cap to 5 (5×2≤10). Offline scripted: full society roster.
+            agent_slice_cap = (
+                len(self._run_agents)
+                if self._is_offline_scripted()
+                else LIVE_TEST_MAX_AGENTS
+            )
             agents = [
                 a for _, a in env.agent_graph.get_agents()
-            ][: min(remaining, len(self._run_agents), LIVE_TEST_MAX_AGENTS)]
+            ][: min(remaining, len(self._run_agents), agent_slice_cap)]
             actions = {agent: LLMAction() for agent in agents}
             for agent in agents:
                 profile = self._agent_profiles.get(agent.social_agent_id)
@@ -1311,8 +1420,37 @@ class SimulationEngine:
             knowledge_graph=self.state.knowledge_graph,
         )
         self.state.oasis_reply = oasis_reply_status()
+        self.state.scheduler = self._scheduler.summary()
+        pol = positions_payload.get("polarity_distribution") or {}
+        social = (self.state.knowledge_graph or {}).get("social_relations") or {}
+        self.state.society_overview = {
+            "agent_count": len(self._run_agents),
+            "step": sync_step,
+            "posts": len(self.state.posts),
+            "comments": len(self.state.comments),
+            "reactions": len(self.state.reactions),
+            "polarity_distribution": pol,
+            "change_count": positions_payload.get("change_count", 0),
+            "social_relations": social,
+            "network": (self.state.knowledge_graph or {}).get("network") or {},
+            "execution_kind": self._execution_kind,
+            "presets": list(OFFLINE_SCALE_PRESETS),
+            "live_llm_max_agents": LIVE_TEST_MAX_AGENTS,
+            "offline_max_agents": OFFLINE_MAX_AGENTS,
+            "paid_llm_unlocked_for_scale": False,
+            "scheduler_plans": (self.state.scheduler or {}).get("plans", 0),
+            "self_as_partner_count": (self.state.scheduler or {}).get(
+                "self_as_partner_count", 0
+            ),
+        }
 
-    def _persist_results(self, db_path: Path) -> Path:
+    def _persist_results(
+        self,
+        db_path: Path,
+        *,
+        status: str | None = None,
+        stop_reason: str | None = None,
+    ) -> Path:
         self._refresh_from_db(db_path)
         self._sync_cost_to_state()
         out = self.cfg.results_dir / f"{self.state.run_id}.json"
@@ -1326,22 +1464,34 @@ class SimulationEngine:
                 and not prompt_summary.get("oasis_default_active")
             )
         )
+        meta_status = status if status is not None else self.state.status
+        meta_stop = stop_reason if stop_reason is not None else self.state.stop_reason
         payload = {
             "meta": {
                 "run_id": self.state.run_id,
                 "scenario": self.state.scenario,
                 "language": self.state.language,
                 "mode": self.state.mode,
-                "status": self.state.status,
-                "stop_reason": self.state.stop_reason,
+                "status": meta_status,
+                "stop_reason": meta_stop,
                 "llm_configured": self.state.llm_configured,
                 "started_at": self.state.started_at,
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 5,
+                "phase": 6,
+                "execution_kind": self._execution_kind,
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
+                "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
+                "live_llm_limits_unchanged": {
+                    "max_agents": LIVE_TEST_MAX_AGENTS,
+                    "max_rounds": LIVE_TEST_MAX_ROUNDS,
+                    "max_model_calls": LIVE_TEST_MAX_LLM_CALLS,
+                    "max_tokens_per_run": 20_000,
+                    "max_tokens_per_call": 500,
+                    "max_cost_usd_per_run": 0.20,
+                },
                 "agent_memory_window": self.cfg.agent_memory_window,
                 "agent_local_memory_entries": self.cfg.agent_local_memory_entries,
                 "zep_integrated": False,
@@ -1368,6 +1518,7 @@ class SimulationEngine:
                     "persistent_positions": True,
                     "local_comment_refs": True,
                     "round2_comment_reactions": True,
+                    "scheduler": True,
                     "relations_evidenced_only": [
                         "agrees_with",
                         "disagrees_with",
@@ -1390,6 +1541,8 @@ class SimulationEngine:
             "knowledge_graph": self.state.knowledge_graph,
             "interaction_summary": self.state.interaction_summary,
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),
+            "scheduler": self.state.scheduler,
+            "society_overview": self.state.society_overview,
             "db_path": str(db_path),
         }
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -18,8 +18,10 @@ from dataclasses import replace
 
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 
-# Hard ceiling kept in sync with Phase-2.x live-test policy (config clamps too).
-MAX_GENERATABLE_AGENTS = 5
+# Offline/Scripted society ceiling (Phase 6). Live-LLM still clamps to 5 in engine.
+MAX_GENERATABLE_AGENTS = 50
+LIVE_LLM_MAX_AGENTS = 5
+OFFLINE_SCALE_PRESETS = (10, 25, 50)
 
 _ARCHETYPES: list[dict[str, str]] = [
     {
@@ -56,6 +58,41 @@ _ARCHETYPES: list[dict[str, str]] = [
         "description": "Betont Betroffene, Nuancen und soziale Kosten.",
         "goal": "Menschliche Auswirkungen und inklusivere Perspektiven einbringen.",
         "style": "warm, reflektiert, inklusiv",
+    },
+    {
+        "slug": "historian",
+        "name": "Historiker",
+        "description": "Vergleicht mit früheren Stadtentwicklungen und Politikzyklen.",
+        "goal": "Pfadabhängigkeiten und Lernmomente aus der Vergangenheit markieren.",
+        "style": "kontextreich, vergleichend",
+    },
+    {
+        "slug": "engineer",
+        "name": "Ingenieur",
+        "description": "Prüft technische Machbarkeit, Kapazität und Infrastruktur.",
+        "goal": "Technische Engpässe und realistische Ausbaupfade benennen.",
+        "style": "sachlich, spezifikationsnah",
+    },
+    {
+        "slug": "journalist",
+        "name": "Journalist",
+        "description": "Fragt nach Belegen, Narrativen und öffentlichen Interessen.",
+        "goal": "Klärungsfragen stellen und blinde Flecken der Debatte aufzeigen.",
+        "style": "nachhakend, öffentlichkeitsorientiert",
+    },
+    {
+        "slug": "activist",
+        "name": "Aktivist",
+        "description": "Drängt auf ambitionierte Ziele und schnelle Umsetzung.",
+        "goal": "Druck für mutige Maßnahmen ohne Verwässerung aufbauen.",
+        "style": "engagiert, mobilisierend",
+    },
+    {
+        "slug": "skeptic",
+        "name": "Skeptiker",
+        "description": "Misstraut Modellannahmen und prognostizierten Nebenwirkungen.",
+        "goal": "Überzogene Versprechen und versteckte Kosten entlarven.",
+        "style": "kritisch, nüchtern",
     },
 ]
 
@@ -165,6 +202,46 @@ _FIRST_NAMES = [
     "Harper",
     "Indigo",
     "Jordan",
+    "Kai",
+    "Logan",
+    "Morgan",
+    "Noa",
+    "Oakley",
+    "Parker",
+    "Quinn",
+    "Riley",
+    "Sage",
+    "Taylor",
+    "Uma",
+    "Val",
+    "Wren",
+    "Yael",
+    "Zion",
+    "Ari",
+    "Brook",
+    "Chris",
+    "Dana",
+    "Eli",
+    "Fran",
+    "Gale",
+    "Hyun",
+    "Ira",
+    "Jules",
+    "Kim",
+    "Lee",
+    "Mika",
+    "Nik",
+    "Oli",
+    "Pat",
+    "Remy",
+    "Sam",
+    "Tess",
+    "Uri",
+    "Vic",
+    "Wes",
+    "Xan",
+    "Yuri",
+    "Zoe",
 ]
 
 _STOP = frozenset(
@@ -631,9 +708,14 @@ def generate_dynamic_agents(
     *,
     max_agents: int = MAX_GENERATABLE_AGENTS,
 ) -> list[AgentProfile]:
-    """Build ``count`` unique scenario-bound profiles (no clones)."""
+    """Build ``count`` unique scenario-bound profiles (no clones).
+
+    Scales deterministically to offline presets 10/25/50. Live-LLM callers
+    must pass ``max_agents=LIVE_LLM_MAX_AGENTS`` (5).
+    """
     n = max(1, min(int(count), int(max_agents), MAX_GENERATABLE_AGENTS))
-    roles = extract_stakeholder_roles(scenario, limit=n)
+    # Stakeholder roles first; remainder filled by archetypes (deterministic).
+    roles = extract_stakeholder_roles(scenario, limit=min(n, 12))
     keywords = extract_scenario_keywords(scenario)
     topic = _topic_phrase(keywords)
     short = (scenario or "").strip()[:120] or "Offenes Diskussionsthema"
@@ -643,34 +725,37 @@ def generate_dynamic_agents(
 
     for i in range(n):
         arch = _ARCHETYPES[i % len(_ARCHETYPES)]
+        voice_id = _unique_suffix(short, i, arch["slug"])
         if i < len(roles):
             persona = _persona_for_role(roles[i], arch)
             display = persona["name"]
             # Disambiguate if the same role maps twice.
             if display.lower() in used_names:
                 display = f"{persona['name']} {i + 1}"
-            user_name = f"{persona['slug']}_{_unique_suffix(short, i, persona['slug'])}"
+            user_name = f"{persona['slug']}_{voice_id}"
             description = (
                 f"{persona['description']} Bezieht Positionen explizit auf «{topic}» "
-                f"im Szenario: {short}."
+                f"im Szenario: {short}. Stimme #{i + 1}/{n} ({voice_id})."
             )
             conflict = persona.get("conflict") or _archetype_conflict(arch)
-            goal = f"{persona['goal']} Zielkonflikt: {conflict} Thema: {topic}."
+            goal = (
+                f"{persona['goal']} Zielkonflikt: {conflict} Thema: {topic}. "
+                f"[id={voice_id}]"
+            )
             style = persona["style"]
         else:
             first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
-            suffix = _unique_suffix(short, i, arch["slug"])
             display = f"{first} {arch['name']}"
             if display.lower() in used_names:
-                display = f"{first} {arch['name']} {suffix}"
-            user_name = f"{_slugify(first)}_{arch['slug']}_{suffix}"
+                display = f"{first} {arch['name']} {voice_id}"
+            user_name = f"{_slugify(first)}_{arch['slug']}_{voice_id}"
             description = (
                 f"{arch['description']} Bezieht Positionen explizit auf «{topic}» "
-                f"im Szenario: {short}."
+                f"im Szenario: {short}. Stimme #{i + 1}/{n} ({voice_id})."
             )
             goal = (
                 f"{arch['goal']} Zielkonflikt: {_archetype_conflict(arch)} "
-                f"Thema: {topic}."
+                f"Thema: {topic}. [id={voice_id}]"
             )
             style = arch["style"]
 
@@ -694,8 +779,11 @@ def generate_dynamic_agents(
 
 
 def fixed_test_agents(count: int = 5) -> list[AgentProfile]:
-    """Phase-2 regression roster — fixed five personalities (truncated if count < 5)."""
-    n = max(1, min(int(count), len(DEFAULT_AGENTS), MAX_GENERATABLE_AGENTS))
+    """Phase-2 regression roster — fixed five personalities (truncated if count < 5).
+
+    Never expands beyond the classic five — use ``dynamic`` for 10/25/50.
+    """
+    n = max(1, min(int(count), len(DEFAULT_AGENTS), LIVE_LLM_MAX_AGENTS))
     return [replace(p) for p in DEFAULT_AGENTS[:n]]
 
 

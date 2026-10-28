@@ -1,8 +1,8 @@
-# EC-Simulation (Phase 3)
+# EC-Simulation (Phase 6)
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
 
-Phase 1: echte `ManualAction`-Läufe. Phase 2.x: echte OASIS `LLMAction`, Sprache, Freigabe, Limits. **Phase 3:** dynamische Agentengenerierung aus dem Szenario (einstellbare Anzahl, `fixed_test` = feste 5), echte Interaktionen (Post/Kommentar-Reply/Like/Dislike), lokales begrenztes Agentengedächtnis (Zep nur vorbereitet), lokaler Wissensgraph + Dashboard.
+Phase 1–5.2: Manual/LLMAction, Freigabe, Token-Gates, Social Dynamics. **Phase 6:** skalierbare Offline-Gesellschaft **10/25/50** (Manual/Scripted). Live-LLM-Ceilings bleiben **5/2/10/20k/500/$0.20** — Scale schaltet kein bezahltes LLM frei. Architektur: `docs/architecture-phase6.md`.
 
 ## Voraussetzungen
 
@@ -54,14 +54,19 @@ npm run dev
 # → http://127.0.0.1:5173
 ```
 
-## Phase 3 — Dynamische Agenten
+## Agenten — Live vs Offline-Scale
 
 | Modus | Bedeutung |
 |-------|-----------|
 | `dynamic` | Einzigartige Personas aus Szenario-Keywords (keine Klone) |
 | `fixed_test` | Klassisches Alice…Eve-Roster (Testmodus, max. 5) |
 
-Anzahl: 1–5 (Live-Test-Ceiling aus Phase 2.x). Start-Body: `agent_count`, `agent_generation`.
+| Pfad | Agenten |
+|------|---------|
+| Live-LLM | 1–**5** (unverändert) |
+| Manual / Scripted Offline | 1–**50**, Presets **10/25/50** |
+
+Start-Body: `agent_count`, `agent_generation`. Siehe `docs/architecture-phase6.md`.
 
 ## ManualAction vs LLMAction
 

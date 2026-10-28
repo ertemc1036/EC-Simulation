@@ -88,6 +88,12 @@ export interface KnowledgeGraph {
     influenced_by?: number
     position_changed?: number
   }
+  network?: {
+    actors?: number
+    statements?: number
+    topics?: number
+    social_edges?: number
+  }
   nodes?: Array<{
     id: string
     kind: string
@@ -134,8 +140,43 @@ export interface AgentPositionsSnapshot {
   backend?: string
   agent_count?: number
   change_count?: number
+  polarity_distribution?: Record<string, number>
   positions?: AgentPosition[]
   changes?: Array<Record<string, unknown>>
+  note?: string
+}
+
+export interface SocietyOverview {
+  agent_count?: number
+  step?: number | null
+  posts?: number
+  comments?: number
+  reactions?: number
+  polarity_distribution?: Record<string, number>
+  change_count?: number
+  social_relations?: Record<string, number>
+  network?: {
+    actors?: number
+    statements?: number
+    topics?: number
+    social_edges?: number
+  }
+  execution_kind?: string
+  presets?: number[]
+  live_llm_max_agents?: number
+  offline_max_agents?: number
+  paid_llm_unlocked_for_scale?: boolean
+  scheduler_plans?: number
+  self_as_partner_count?: number
+}
+
+export interface SchedulerSnapshot {
+  backend?: string
+  plans?: number
+  unique_pairs?: number
+  self_as_partner_count?: number
+  self_reference_blocked?: boolean
+  recent?: Array<Record<string, unknown>>
   note?: string
 }
 
@@ -169,6 +210,7 @@ export interface SimulationState {
   max_steps: number
   agent_count?: number
   agent_generation?: string
+  execution_kind?: string
   llm_configured: boolean
   message: string
   stop_reason?: string | null
@@ -185,6 +227,8 @@ export interface SimulationState {
   knowledge_graph?: KnowledgeGraph
   interaction_summary?: InteractionSummary
   oasis_reply?: OasisReplyInfo
+  scheduler?: SchedulerSnapshot
+  society_overview?: SocietyOverview
   error: string | null
   result_path: string | null
   db_path: string | null
@@ -205,6 +249,7 @@ export interface HealthResponse {
     openai_model: string
     openai_base_url?: string
     max_agents?: number
+    offline_max_agents?: number
     default_agent_count?: number
     default_agent_generation?: string
     agent_generation_modes?: string[]
@@ -227,6 +272,16 @@ export interface HealthResponse {
       max_rounds: number
       max_model_calls: number
       max_retries: number
+      max_tokens_per_run?: number
+      max_tokens_per_call?: number
+      max_cost_usd_per_run?: number
+    }
+    offline_scale?: {
+      max_agents?: number
+      presets?: number[]
+      max_rounds?: number
+      paid_llm_unlocked?: boolean
+      note?: string
     }
     zep_enabled: boolean
     zep_configured: boolean
@@ -237,6 +292,8 @@ export interface HealthResponse {
     social_dynamics?: {
       persistent_positions?: boolean
       relations_evidenced_only?: string[]
+      scheduler?: boolean
+      offline_scale_presets?: number[]
     }
     api_key_exposed?: boolean
   }
