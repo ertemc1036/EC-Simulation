@@ -12,8 +12,10 @@ This document is an interface. It does not change the simulation engine, API key
 - Authentication: none
 - SSO: not part of this contract
 - This API does not write into or modify other applications
-- Research sessions in this MVP do not call OpenAI and do not start the OASIS simulation engine
-- `genuine_ai_research` is `false` on every export from this MVP
+- Offline Demo sessions do not call a provider and do not start the OASIS simulation engine
+- AI Research calls an OpenAI-compatible chat endpoint only after `llm_run_approved=true` on that same request
+- Research approval is not read from Simulation Lab
+- Page loads and GET routes do not call a provider
 - `paid_llm_unlocked` stays `false`
 - Live ceilings stay 5 agents / 2 rounds / 10 calls / 20_000 tokens / 500 output tokens / $0.20
 - A paid simulation start without `llm_run_approved=true` still returns HTTP 409 from `/api/simulation/start`
@@ -104,11 +106,19 @@ Response session fields:
 - `provider_calls`: 0
 - `cost_usd`: 0
 
-`mode=llm` without `llm_run_approved` returns **409** with `status: blocked` and an approval (`Freigabe`) message.
+`mode=offline_fixture` (the default) writes an offline demo transcript. It makes no provider call, including when `llm_run_approved` is also set. Demo transcripts stay labeled `offline_deterministic_fixture`.
 
-`mode=llm` with `llm_run_approved: true` also returns **409**. Approval does not unlock a provider on this resource. `paid_llm_unlocked` is false and `openai_calls` is 0.
+`mode=llm` without `llm_run_approved` returns **409** with `status: blocked` and an approval (`Freigabe`) message. No provider object is used.
 
-Other modes return 400. Use Simulation Lab for the OASIS engine.
+`mode=llm` with `llm_run_approved: true` on an offline demo example returns **400** (`status: offline_demo`) and makes no provider call. Demo transcripts are not relabeled as model output.
+
+`mode=llm` with approval on a custom study requires model participants (`POST .../participants` with `mode=ai` and the same approval flag), a configured key or an injected provider, and room under the ceilings. The short protocol is 3 participants and 2 turns. Every provider call counts toward 10 calls / 20_000 tokens / 500 output tokens / $0.20. `paid_llm_unlocked` stays false. If the budget cannot cover the next call, the response is a partial result and the missing turns are not invented.
+
+Other modes return 400. This resource does not start the OASIS engine.
+
+### `GET /api/v1/research/studies/{study_id}/cost-estimate`
+
+Local arithmetic for the short protocol. `provider_call_made` is false.
 
 ### `POST /api/v1/research/studies/{study_id}/findings`
 
@@ -124,9 +134,9 @@ Builds interpretations that cite statement ids and, when present, a user-supplie
 - `study.audience`, `study.participants`, `study.sessions`, `study.findings`
 - `source_index`
 - `integrity.ok`, `provenance_kinds_present`, `unresolved_source_ids`, `banned_claim_patterns`
-- `integrity.genuine_ai_research: false`
-- `integrity.openai_calls: 0`
-- `integrity.cost_usd: 0`
+- `integrity.synthesis_method`
+- `integrity.genuine_ai_research` is false for offline demos and for partial model runs
+- `integrity.openai_calls`, `integrity.prompt_tokens`, `integrity.completion_tokens`, `integrity.cost_usd` come from stored provider usage (0 for a demo that never called)
 - `integrity.paid_llm_unlocked: false`
 - `integrity.not_research_validated: true`
 
@@ -146,9 +156,17 @@ Idempotent. Slugs:
 
 Unknown slug: 404.
 
-## Future NanoCrab AI adapter
+## AI Research pathway
 
-A later adapter may implement these same paths. It must keep provenance kinds, must not present synthetic text as human-subject research, and must not add SSO or cross-app writes under this contract. This MVP does not define a provider execution mode that succeeds. Clients must tolerate `genuine_ai_research: false`.
+`POST .../participants` with `{ "mode": "ai", "count": 3, "llm_run_approved": true }` asks the provider for 3 personas. The offline roster is a different code path.
+
+`POST .../sessions` with `{ "mode": "llm", "llm_run_approved": true }` runs `short_interview_v1` (opening and one follow-up per persona).
+
+`POST .../findings` with `{ "llm_run_approved": true }` on a model session synthesizes interpretations that cite statement ids. `synthesis_method` is `model_structured_json` when that parse succeeds, and `templated_offline_fixture` for offline demo findings. Invalid provider JSON is not stored. Percentages, sample sizes, and significance language are rejected.
+
+`genuine_ai_research` is true only for a complete model interview plus model synthesis. Partial runs stay false. Offline exports stay false. `not_research_validated` stays true.
+
+A missing key returns HTTP 400 with `missing_credentials: true` and does not open a socket. Simulation approval is not consulted.
 
 ## Licensing
 

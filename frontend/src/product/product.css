@@ -326,6 +326,39 @@
   margin: 0.25rem 0;
 }
 
+.nc-modes {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.8rem 0 0.2rem;
+}
+
+.nc-modes button {
+  border-radius: 999px;
+  border: 1px solid rgba(62, 224, 210, 0.35);
+  background: transparent;
+  color: #d9fffb;
+  padding: 0.4rem 0.8rem;
+  font-weight: 650;
+}
+
+.nc-modes button.active {
+  background: #3ee0d2;
+  color: #04222a;
+  border-color: #3ee0d2;
+}
+
+.nc-estimate {
+  margin-bottom: 0.8rem;
+}
+
+.nc-check {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 0.6rem;
+  color: #f3e6cf;
+}
+
 @media (max-width: 860px) {
   .nc-frame {
     grid-template-columns: 1fr;

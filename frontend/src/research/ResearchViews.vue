@@ -20,6 +20,7 @@ interface Participant {
   perspective?: string
   synthetic?: boolean
   human_subject?: boolean
+  generation?: string
 }
 
 interface Statement {
@@ -28,6 +29,36 @@ interface Statement {
   participant_id: string
   text: string
   source_refs?: string[]
+  origin?: string
+}
+
+interface Usage {
+  calls?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  cost_usd?: number
+  partial?: boolean
+  stop_reason?: string | null
+  paid_llm_unlocked?: boolean
+}
+
+interface CostEstimate {
+  provider_call_made?: boolean
+  paid_llm_unlocked?: boolean
+  protocol?: string
+  totals?: {
+    calls: number
+    estimated_prompt_tokens: number
+    estimated_completion_tokens: number
+    estimated_total_tokens: number
+    estimated_cost_usd: number
+  }
+  full_protocol_fits_remaining_budget?: boolean
+  budget_note?: string
+  disclaimer?: string
+  ceilings?: Record<string, number>
+  recorded_usage?: Usage
 }
 
 interface Finding {
@@ -56,13 +87,24 @@ interface Study {
     execution: string
     label?: string
     genuine_ai?: boolean
+    provider?: string | null
     provider_calls?: number
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
     cost_usd?: number
+    partial?: boolean
+    stop_reason?: string | null
+    protocol?: string
     statements: Statement[]
   }>
   findings?: Finding[]
-  disclaimer?: { summary?: string }
+  disclaimer?: { summary?: string; genuine_ai_research?: boolean }
   user_input_contains_percent_pattern?: boolean
+  participant_generation?: string | null
+  synthesis_method?: string | null
+  ai_usage?: Usage
+  ai_cost_estimate?: CostEstimate
 }
 
 interface StudySummary {
@@ -82,6 +124,8 @@ interface Dashboard {
     paid_llm_unlocked?: boolean
     live_test_limits?: Record<string, number>
   }
+  recorded_provider_usage?: Usage
+  page_load_makes_provider_calls?: boolean
   counts?: Record<string, number>
   examples?: Array<{
     slug: string
@@ -123,6 +167,8 @@ const tab = ref<'overview' | 'participants' | 'sessions' | 'findings' | 'report'
 const exportPayload = ref<unknown>(null)
 const error = ref<string | null>(null)
 const busy = ref(false)
+const researchMode = ref<'offline_demo' | 'ai_research'>('offline_demo')
+const aiApproved = ref(false)
 
 const projectForm = ref({ name: '', organization: '' })
 const studyForm = ref({
@@ -150,6 +196,14 @@ const workflowLabels: Record<string, string> = {
 
 function personName(study: Study, id: string) {
   return study.participants?.find((p) => p.id === id)?.name || id
+}
+
+function money(value: number | undefined) {
+  return (value ?? 0).toFixed(6)
+}
+
+function isModelSession(session: { execution?: string }) {
+  return session.execution === 'model_interview'
 }
 
 async function refresh() {
@@ -189,6 +243,8 @@ async function openStudy(id: string) {
   try {
     const data = await api<{ study: Study }>(`/api/v1/research/studies/${id}`)
     active.value = data.study
+    aiApproved.value = false
+    if (data.study.read_only_fixture) researchMode.value = 'offline_demo'
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not open the study.'
   } finally {
@@ -255,12 +311,12 @@ async function createStudy() {
   }
 }
 
-async function postStep(path: string) {
+async function postStep(path: string, body: Record<string, unknown> = {}) {
   if (!active.value) return
   busy.value = true
   error.value = null
   try {
-    await api(path, { method: 'POST', body: '{}' })
+    await api(path, { method: 'POST', body: JSON.stringify(body) })
     const data = await api<{ study: Study }>(`/api/v1/research/studies/${active.value.id}`)
     active.value = data.study
     exportPayload.value = null
@@ -270,6 +326,16 @@ async function postStep(path: string) {
   } finally {
     busy.value = false
   }
+}
+
+async function runApproved(path: string, extra: Record<string, unknown>) {
+  if (!aiApproved.value) {
+    error.value = 'Approval required (Freigabe) for this research run. No request was sent.'
+    return
+  }
+  const approved = aiApproved.value
+  aiApproved.value = false
+  await postStep(path, { ...extra, llm_run_approved: approved })
 }
 
 async function loadExport(download: boolean) {
@@ -306,11 +372,11 @@ onMounted(refresh)
 
     <section v-if="view === 'dashboard'">
       <p class="nc-kicker">Dashboard</p>
-      <h1>Research studies on offline fixtures</h1>
+      <h1>Offline Demo and AI Research</h1>
       <p class="nc-lede">
-        Create a project, write a question and context, name an audience, add three to five
-        synthetic personas, run one offline session, read findings that cite source ids, then
-        export JSON.
+        Offline Demo uses labeled fixtures and makes no provider call. AI Research is a separate
+        short interview of 3 synthetic personas. It shows a cost estimate first and calls a model
+        only after you approve that run.
       </p>
       <div class="nc-banner">
         <strong>Not human research.</strong>
@@ -324,7 +390,10 @@ onMounted(refresh)
         <span class="nc-chip">Out {{ dashboard?.ceilings?.live_test_limits?.max_tokens_per_call ?? 500 }}</span>
         <span class="nc-chip">$ {{ dashboard?.ceilings?.live_test_limits?.max_cost_usd_per_run ?? 0.2 }}</span>
         <span class="nc-chip">paid_llm_unlocked=false</span>
-        <span class="nc-chip">OpenAI calls 0</span>
+        <span class="nc-chip">Page load calls 0</span>
+        <span class="nc-chip">
+          Recorded calls {{ dashboard?.recorded_provider_usage?.calls ?? 0 }}
+        </span>
       </div>
       <div class="nc-grid">
         <article class="nc-card">
@@ -343,7 +412,7 @@ onMounted(refresh)
           <p>Reports {{ dashboard?.counts?.reports ?? 0 }}</p>
         </article>
       </div>
-      <h2>B2B offline examples</h2>
+      <h2>B2B offline demo examples</h2>
       <div class="nc-grid">
         <article v-for="example in dashboard?.examples || []" :key="example.slug" class="nc-card">
           <p class="nc-kicker">{{ example.slug }}</p>
@@ -386,9 +455,26 @@ onMounted(refresh)
       <p class="nc-kicker">Research study</p>
       <div class="nc-actions">
         <button type="button" class="nc-btn-ghost" @click="active = null">All studies</button>
-        <span v-if="active.example_slug" class="nc-kind kind-source">Offline example</span>
+        <span v-if="active.example_slug" class="nc-kind kind-source">Offline demo</span>
         <span class="nc-kind kind-synthetic_participant">Synthetic</span>
         <span class="nc-muted">{{ active.status }}</span>
+      </div>
+      <div class="nc-modes" role="radiogroup" aria-label="Research mode">
+        <button
+          type="button"
+          :class="{ active: researchMode === 'offline_demo' }"
+          @click="researchMode = 'offline_demo'"
+        >
+          Offline Demo
+        </button>
+        <button
+          type="button"
+          :class="{ active: researchMode === 'ai_research' }"
+          :disabled="active.read_only_fixture"
+          @click="researchMode = 'ai_research'"
+        >
+          AI Research
+        </button>
       </div>
       <h1>{{ active.title }}</h1>
       <p class="nc-muted">{{ active.project_name }} · {{ active.id }}</p>
@@ -435,18 +521,54 @@ onMounted(refresh)
       </div>
 
       <div v-else-if="tab === 'participants'">
+        <article v-if="researchMode === 'ai_research'" class="nc-panel nc-estimate">
+          <h3>Cost estimate before any model call</h3>
+          <p>
+            Full short protocol:
+            {{ active.ai_cost_estimate?.totals?.calls ?? '—' }} calls ·
+            {{ active.ai_cost_estimate?.totals?.estimated_prompt_tokens ?? '—' }} prompt tokens ·
+            {{ active.ai_cost_estimate?.totals?.estimated_completion_tokens ?? '—' }} output tokens ·
+            {{ active.ai_cost_estimate?.totals?.estimated_total_tokens ?? '—' }} total tokens ·
+            ${{ money(active.ai_cost_estimate?.totals?.estimated_cost_usd) }}
+          </p>
+          <p class="nc-muted">{{ active.ai_cost_estimate?.disclaimer }}</p>
+          <p class="nc-muted">
+            Ceilings stay 5 agents / 2 rounds / 10 calls / 20k tokens / 500 output / $0.20.
+            paid_llm_unlocked=false. This estimate did not call a provider.
+          </p>
+          <p v-if="active.ai_cost_estimate?.full_protocol_fits_remaining_budget === false" class="nc-error">
+            {{ active.ai_cost_estimate?.budget_note }}
+          </p>
+          <label class="nc-check">
+            <input v-model="aiApproved" type="checkbox" />
+            Approve this research run only. Simulation Lab approval is not used.
+          </label>
+        </article>
         <div class="nc-actions">
           <button
+            v-if="researchMode === 'offline_demo'"
             type="button"
             class="nc-btn"
             :disabled="busy || active.read_only_fixture"
-            @click="postStep(`/api/v1/research/studies/${active.id}/participants`)"
+            @click="postStep(`/api/v1/research/studies/${active.id}/participants`, { mode: 'offline_fixture' })"
           >
-            Generate 3–5 synthetic personas
+            Generate offline demo personas
+          </button>
+          <button
+            v-else
+            type="button"
+            class="nc-btn"
+            :disabled="busy || !aiApproved"
+            @click="runApproved(`/api/v1/research/studies/${active.id}/participants`, { mode: 'ai', count: 3 })"
+          >
+            Generate 3 model personas
           </button>
         </div>
         <p v-if="active.read_only_fixture" class="nc-muted">
-          This example keeps its authored roster. It was not produced by a model.
+          This example keeps its authored roster. These personas are an offline demo, not model output.
+        </p>
+        <p v-else-if="researchMode === 'offline_demo'" class="nc-muted">
+          Offline demo roster. This button does not call a provider.
         </p>
         <div class="nc-grid">
           <article v-for="person in active.participants || []" :key="person.id" class="nc-card">
@@ -454,35 +576,74 @@ onMounted(refresh)
             <h3>{{ person.name }}</h3>
             <p>{{ person.role }}</p>
             <p class="nc-muted">{{ person.perspective }}</p>
-            <p class="nc-muted">{{ person.id }} · human subject {{ person.human_subject ? 'yes' : 'no' }}</p>
+            <p class="nc-muted">
+              {{ person.id }} · human subject {{ person.human_subject ? 'yes' : 'no' }}
+              · {{ person.generation === 'model' ? 'model persona' : 'offline demo persona' }}
+            </p>
           </article>
         </div>
         <p v-if="!(active.participants || []).length" class="nc-muted">No personas yet.</p>
       </div>
 
       <div v-else-if="tab === 'sessions'">
+        <article v-if="researchMode === 'ai_research'" class="nc-panel nc-estimate">
+          <h3>Cost estimate before the interview</h3>
+          <p>
+            {{ active.ai_cost_estimate?.totals?.calls ?? '—' }} calls ·
+            {{ active.ai_cost_estimate?.totals?.estimated_total_tokens ?? '—' }} tokens ·
+            ${{ money(active.ai_cost_estimate?.totals?.estimated_cost_usd) }}
+          </p>
+          <p class="nc-muted">{{ active.ai_cost_estimate?.disclaimer }}</p>
+          <p class="nc-muted">{{ active.ai_cost_estimate?.budget_note }}</p>
+          <label class="nc-check">
+            <input v-model="aiApproved" type="checkbox" />
+            Approve this research run only. Simulation Lab approval is not used.
+          </label>
+        </article>
         <div class="nc-actions">
           <button
+            v-if="researchMode === 'offline_demo'"
             type="button"
             class="nc-btn"
             :disabled="busy || !(active.participants || []).length"
-            @click="postStep(`/api/v1/research/studies/${active.id}/sessions`)"
+            @click="postStep(`/api/v1/research/studies/${active.id}/sessions`, { mode: 'offline_fixture' })"
           >
-            Run offline session
+            Run offline demo session
+          </button>
+          <button
+            v-else
+            type="button"
+            class="nc-btn"
+            :disabled="busy || !aiApproved || active.participant_generation !== 'model'"
+            @click="runApproved(`/api/v1/research/studies/${active.id}/sessions`, { mode: 'llm' })"
+          >
+            Run AI interview (3 participants)
           </button>
         </div>
-        <p class="nc-muted">
-          Offline deterministic fixture. Not genuine model output. This button does not start
-          Simulation Lab and does not call a provider. A paid run still returns HTTP 409.
+        <p v-if="researchMode === 'offline_demo'" class="nc-muted">
+          Offline demo fixture. This button does not call a provider and does not start Simulation Lab.
+          Demo transcripts are not live AI.
+        </p>
+        <p v-else class="nc-muted">
+          Short protocol: two turns for each of 3 model personas. Offline demo personas are not sent
+          through this path. Without the checkbox the server returns HTTP 409 and makes no call.
         </p>
         <article v-for="session in active.sessions || []" :key="session.id" class="nc-panel">
-          <span class="nc-kind kind-synthetic_statement">{{ session.label || session.execution }}</span>
+          <span v-if="isModelSession(session)" class="nc-kind kind-interpretation">Model transcript</span>
+          <span v-else class="nc-kind kind-synthetic_statement">Offline demo fixture</span>
+          <p>{{ session.label || session.execution }}</p>
+          <p v-if="!isModelSession(session)" class="nc-muted">
+            This transcript is an offline demo. It is not live AI.
+          </p>
           <p class="nc-muted">
-            {{ session.id }} · provider calls {{ session.provider_calls ?? 0 }} · cost
-            {{ session.cost_usd ?? 0 }} · genuine model output {{ session.genuine_ai ? 'yes' : 'no' }}
+            {{ session.id }} · calls {{ session.provider_calls ?? 0 }} ·
+            prompt {{ session.prompt_tokens ?? 0 }} · output {{ session.completion_tokens ?? 0 }} ·
+            total {{ session.total_tokens ?? 0 }} · ${{ money(session.cost_usd) }}
+            <span v-if="session.partial"> · partial {{ session.stop_reason || 'incomplete' }}</span>
           </p>
           <div v-for="statement in session.statements" :key="statement.id" class="nc-card">
-            <span class="nc-kind kind-synthetic_statement">Synthetic statement</span>
+            <span v-if="isModelSession(session)" class="nc-kind kind-interpretation">Model statement</span>
+            <span v-else class="nc-kind kind-synthetic_statement">Offline demo statement</span>
             <p>{{ statement.text }}</p>
             <p class="nc-muted">
               {{ statement.id }} · {{ personName(active, statement.participant_id) }}
@@ -490,19 +651,50 @@ onMounted(refresh)
             </p>
           </div>
         </article>
+        <p v-if="active.ai_usage" class="nc-muted">
+          Study provider usage: {{ active.ai_usage.calls ?? 0 }} calls ·
+          {{ active.ai_usage.prompt_tokens ?? 0 }} prompt tokens ·
+          {{ active.ai_usage.completion_tokens ?? 0 }} output tokens ·
+          ${{ money(active.ai_usage.cost_usd) }} · paid_llm_unlocked=false
+          <span v-if="active.ai_usage.partial"> · partial result, missing pieces were not invented</span>
+        </p>
       </div>
 
       <div v-else-if="tab === 'findings'">
+        <article v-if="researchMode === 'ai_research'" class="nc-panel nc-estimate">
+          <h3>Synthesis uses one model call</h3>
+          <p class="nc-muted">
+            The estimate above is the full protocol, including this call.
+            ${{ money(active.ai_cost_estimate?.totals?.estimated_cost_usd) }} estimated ·
+            {{ active.ai_cost_estimate?.totals?.calls ?? '—' }} calls.
+            No call happens until you approve.
+          </p>
+          <label class="nc-check">
+            <input v-model="aiApproved" type="checkbox" />
+            Approve this synthesis only. Simulation Lab approval is not used.
+          </label>
+        </article>
         <div class="nc-actions">
           <button
+            v-if="researchMode === 'offline_demo'"
             type="button"
             class="nc-btn"
             :disabled="busy || !(active.sessions || []).length"
             @click="postStep(`/api/v1/research/studies/${active.id}/findings`)"
           >
-            Derive findings
+            Derive offline demo findings
+          </button>
+          <button
+            v-else
+            type="button"
+            class="nc-btn"
+            :disabled="busy || !aiApproved"
+            @click="runApproved(`/api/v1/research/studies/${active.id}/findings`, {})"
+          >
+            Synthesize findings
           </button>
         </div>
+        <p v-if="active.synthesis_method" class="nc-muted">Synthesis method: {{ active.synthesis_method }}</p>
         <article v-for="finding in active.findings || []" :key="finding.id" class="nc-panel">
           <span class="nc-kind kind-interpretation">Interpretation</span>
           <h3>{{ finding.title }}</h3>
@@ -521,6 +713,12 @@ onMounted(refresh)
         <h3>Export JSON</h3>
         <p class="nc-muted">
           Schema nanocrab.research.export.v1. Roster counts are not sample sizes. Nothing here is research-validated.
+          Synthesis method: {{ active.synthesis_method || 'not synthesized yet' }}.
+        </p>
+        <p v-if="active.ai_usage" class="nc-muted">
+          Recorded after runs: {{ active.ai_usage.calls ?? 0 }} calls ·
+          {{ active.ai_usage.total_tokens ?? 0 }} tokens ·
+          ${{ money(active.ai_usage.cost_usd) }} · paid_llm_unlocked=false
         </p>
         <div class="nc-actions">
           <button type="button" class="nc-btn" :disabled="busy" @click="loadExport(false)">Preview</button>

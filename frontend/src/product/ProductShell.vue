@@ -18,7 +18,7 @@ const items: { id: ProductView; label: string }[] = [
     <aside class="nc-side">
       <div>
         <p class="nc-mark">NanoCrab Lab</p>
-        <p class="nc-product">Research MVP 1.0</p>
+        <p class="nc-product">Research · Offline Demo / AI Research</p>
       </div>
       <nav class="nc-nav" aria-label="Product">
         <button
@@ -33,8 +33,9 @@ const items: { id: ProductView; label: string }[] = [
         </button>
       </nav>
       <p class="nc-side-note">
-        Synthetic personas are not human research. Sessions on this MVP are offline
-        fixtures, not genuine model output. Provider spend stays at zero.
+        Synthetic personas are not human research. Offline Demo makes no provider call.
+        AI Research needs its own approval and stays inside 10 calls / 20k tokens / $0.20.
+        paid_llm_unlocked=false.
       </p>
     </aside>
     <main class="nc-main" :class="{ 'nc-main-lab': view === 'lab' }">

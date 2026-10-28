@@ -1,4 +1,8 @@
-"""Versioned research API. No SSO. No provider calls."""
+"""Versioned research API. No SSO.
+
+GET routes do not call a provider. Model routes call only after a run-specific
+approval on that request. This blueprint does not start the simulation engine.
+"""
 from __future__ import annotations
 
 import threading
@@ -108,9 +112,15 @@ def research_session(study_id: str):
     return _call(get_service().run_session, study_id, body)
 
 
+@research_bp.get("/api/v1/research/studies/<study_id>/cost-estimate")
+def research_cost_estimate(study_id: str):
+    return _call(get_service().cost_estimate, study_id)
+
+
 @research_bp.post("/api/v1/research/studies/<study_id>/findings")
 def research_findings(study_id: str):
-    return _call(get_service().derive_findings, study_id)
+    body = request.get_json(silent=True) or {}
+    return _call(get_service().derive_findings, study_id, body)
 
 
 @research_bp.get("/api/v1/research/studies/<study_id>/export")
