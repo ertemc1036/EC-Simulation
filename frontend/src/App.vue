@@ -2,8 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { io, Socket } from 'socket.io-client'
 import type { AgentProfile, HealthResponse, SimulationState } from './types'
+import ProductShell from './product/ProductShell.vue'
+import type { ProductView } from './product/types'
+import ResearchViews from './research/ResearchViews.vue'
 
 const API = ''
+const productView = ref<ProductView>('dashboard')
 
 const health = ref<HealthResponse | null>(null)
 const agents = ref<AgentProfile[]>([])
@@ -484,15 +488,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="shell">
+  <ProductShell v-model="productView">
+    <ResearchViews
+      v-show="productView !== 'lab'"
+      :view="productView"
+      @navigate="productView = $event"
+    />
+    <div v-show="productView === 'lab'" class="shell">
     <header class="hero">
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-8.3 Realistic Agent Behavior — Persona Motivation V4,
-        Argument-Grounded Interaction V3, Stance Classification V3, Opinion
-        Dynamics V3, Interaction Quality (Offline 10/25/50 × ≤4). Live-LLM bleibt
-        ≤5 · paid_llm_unlocked=false.
+        The Phase 8.5 OASIS engine stays here. Live limits remain 5 agents, 2 rounds,
+        10 calls, 20k tokens, 500 output tokens, and $0.20. paid_llm_unlocked=false.
+        Research studies do not start this runner.
       </p>
     </header>
 
@@ -1246,7 +1255,8 @@ onUnmounted(() => {
       </div>
       <p v-else class="empty">Long-Term Memory nach dem Lauf sichtbar (kein Zep).</p>
     </section>
-  </div>
+    </div>
+  </ProductShell>
 </template>
 
 <style scoped>
@@ -1335,7 +1345,7 @@ textarea,
 select,
 input {
   width: 100%;
-  background: rgba(8, 16, 14, 0.65);
+  background: rgba(6, 16, 28, 0.72);
   border: 1px solid var(--line);
   color: var(--ink);
   padding: 0.7rem 0.8rem;

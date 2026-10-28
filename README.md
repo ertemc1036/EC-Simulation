@@ -1,6 +1,10 @@
-# EC-Simulation (Phase 8.2)
+# EC-Simulation (Phase 8.5) + NanoCrab Lab Research MVP
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
+
+**NanoCrab Lab** adds a research-study workflow on top of that engine: project, question, context, audience, 3–5 synthetic participants, one offline session, findings with source ids, JSON export. Sessions are deterministic fixtures, not model output and not human-subject research. The simulation engine is unchanged. Contract: `docs/nanocrab-research-api-v1.md`.
+
+Try it: start both processes below, open http://127.0.0.1:5173, then Dashboard → open “Seat price to usage price” (or banking onboarding, or restaurant software) → Participants, Sessions, Findings, Report → Download JSON. A new study is Projects → Create, then Research Studies → Create, then generate personas, run the offline session, derive findings, export.
 
 Phase 1–5.2: Manual/LLMAction, Freigabe, Token-Gates, Social Dynamics. Phase 6–7: skalierbare Offline-Gesellschaft + Society Intelligence. Phase 8.0/8.1: Scalable Foundation + Controlled Multi-Agent Scaling. **Phase 8.2:** Simulation Intelligence & Debate Quality — Argument Intelligence V2, Debate Engine V2, Stance Classification V2, Opinion Dynamics V2, Quality Dashboard (Offline 10/25/50 × ≤4). Live-LLM-Ceilings bleiben **5/2/10/20k/500/$0.20** (`paid_llm_unlocked=false`). Architektur: `docs/architecture-phase8.2.md`.
 
