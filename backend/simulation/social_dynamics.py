@@ -80,16 +80,39 @@ _PRO_MARKERS = (
     "pro grundeinkommen",
     "sinnvolles verbot",
     "existenzsicherung ohne sanktionsdruck",
+    # Live-LLM BGE phrasing (Phase 7.2) — clear support without "ja zum …".
+    "soziale absicherung",
+    "wichtige soziale absicherung",
+    "würde und planbarkeit",
+    "planungssicherheit",
+    "ohne sanktion",
+    "ohne angst vor sanktion",
+    "bedingungslose absicherung",
+    "ermöglicht, sich voll auf das studium",
+    "für studierende eine enorme erleichterung",
     "support the ban",
     "agree with the ban",
 )
 # Verb support for ban / BGE / generic measure.
+# Allow longer bridges ("unterstütze die Einführung des bedingungslosen …").
 _PRO_BAN_RE = re.compile(
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot|"
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:die\s+)?maßnahme|"
-    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:das\s+)?grundeinkommen|"
-    r"befürworte?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot|"
-    r"befürworte?\s+(?:\w+\s+){0,2}(?:ein\s+|das\s+)?grundeinkommen",
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:das\s+)?verbot|"
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:die\s+)?maßnahme|"
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,6}(?:das\s+|ein\s+|des\s+)?"
+    r"(?:bedingungslose[sn]?\s+)?grundeinkommen|"
+    r"befürworte?\s+(?:\w+\s+){0,4}(?:das\s+)?verbot|"
+    r"befürworte?\s+(?:\w+\s+){0,4}(?:ein\s+|das\s+|bedingungslose\s+)?"
+    r"grundeinkommen|"
+    r"bietet\s+(?:\w+\s+){0,3}(?:soziale\s+)?absicherung",
+    re.IGNORECASE,
+)
+# Reject phrasing with words between "lehne" and "ab".
+_CONTRA_REJECT_RE = re.compile(
+    r"lehne(?:n)?\s+(?:\w+\s+){0,8}ab\b|"
+    r"lehne(?:n)?\s+(?:\w+\s+){0,6}(?:das\s+)?(?:bedingungslose[sn]?\s+)?"
+    r"grundeinkommen|"
+    r"finanzierung\s+(?:\w+\s+){0,4}ungeklärt|"
+    r"inflations-?\s*und\s+steuerlast",
     re.IGNORECASE,
 )
 
@@ -121,6 +144,18 @@ _CONTRA_MARKERS = (
     "oppose",
     "disagree with the ban",
     "protest",
+)
+
+# Balanced BGE / measure stance: support + incentive / wage caveats (not full contra).
+_BGE_EXCEPTION_MARKERS = (
+    "arbeitsanreize",
+    "anreize für erwerbsarbeit",
+    "vollzeitarbeit entwert",
+    "löhne müssen weiterhin attraktiv",
+    "faire und attraktive löhne",
+    "anrechnung des grundeinkommens",
+    "kompatibilität mit löhnen",
+    "basisabsicherung",
 )
 
 # Explicit mind-change language only (bare "Kompromiss" is too common).
@@ -253,12 +288,22 @@ def _polarity(text: str) -> str:
     if _PRO_BAN_RE.search(low):
         pro += 1
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
-    exception = sum(1 for m in _EXCEPTION_MARKERS if m in low)
+    if _CONTRA_REJECT_RE.search(low):
+        contra += 1
+    classic_exception = sum(1 for m in _EXCEPTION_MARKERS if m in low)
+    bge_balance = sum(1 for m in _BGE_EXCEPTION_MARKERS if m in low)
     mediating = sum(1 for m in _MEDIATING_MARKERS if m in low)
+    # BGE balancing (Anreize/Löhne) only when not a hard reject.
+    exception = classic_exception + (bge_balance if contra == 0 else 0)
 
     # Ausnahme-/Übergangsforderungen are a stable stance vs. full ban —
     # not a synthetic pro from "Unterstützung" / "notwendig".
-    if exception and pro == 0:
+    # Classic Ausnahme markers win even when soft contra ("mit Sorge") co-occurs.
+    if classic_exception and pro == 0:
+        return "exception"
+    if exception and pro > 0 and contra == 0:
+        return "exception"
+    if exception and pro == 0 and contra == 0:
         return "exception"
     if pro > contra and pro > 0:
         return "pro"

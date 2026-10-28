@@ -186,3 +186,65 @@ def contains_mobility_leak(text: str) -> bool:
 def synthetic_tag() -> str:
     """Public marker for offline Manual/Scripted content (not live LLM)."""
     return "[synthetisch]"
+
+
+# Public-feed instruction leaks (must never appear in seed / public posts).
+# Note: argumentative "Zielkonflikt: …" stance lines are allowed in offline
+# Manual/Scripted content; the seed dump pattern is "— Ziel: <persona goal>".
+PUBLIC_FEED_LEAK_MARKERS = (
+    "stil:",
+    "[id=",
+    "system prompt",
+    "you are",
+    "halteeine klare",
+)
+_GOAL_DUMP_RE = re.compile(
+    r"(?i)(?:—|-)\s*ziel\s*:|"
+    r"diskussionsimpuls\s*\([^)]*\)\s*:.*ziel\s*:",
+)
+
+
+def contains_public_feed_leak(text: str) -> bool:
+    """True if public feed text dumps goals, IDs, style, or prompt residue."""
+    raw = text or ""
+    low = raw.lower()
+    if any(m in low for m in PUBLIC_FEED_LEAK_MARKERS):
+        return True
+    return bool(_GOAL_DUMP_RE.search(raw))
+
+
+def public_scenario_thesis(scenario: str, *, limit: int = 280) -> str:
+    """First thesis sentence only — strips multi-paragraph instruction blocks."""
+    text = " ".join((scenario or "").split()).strip()
+    if not text:
+        return "Diskussionsimpuls zur aktuellen These."
+    # Cut at instruction verbs that often follow the thesis in user prompts.
+    cut_re = re.compile(
+        r"(?i)\b(?:simuliere|berücksichtige|beruecksichtige|untersuche|"
+        r"analysiere|entwickle)\b"
+    )
+    m = cut_re.search(text)
+    if m and m.start() > 40:
+        text = text[: m.start()].rstrip(" .,;:")
+    # Prefer first sentence.
+    parts = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
+    thesis = parts[0].strip() if parts else text
+    if len(thesis) > limit:
+        thesis = thesis[: limit - 1].rstrip() + "…"
+    return thesis or text[:limit]
+
+
+def build_public_seed_content(
+    scenario: str,
+    *,
+    language: str = "de",
+) -> str:
+    """Public seed post — scenario discussion impulse only (no goal/ID/style)."""
+    thesis = public_scenario_thesis(scenario)
+    measure = measure_label(scenario)
+    lang = (language or "de").strip().lower() or "de"
+    if lang.startswith("de"):
+        ask = f"Wie bewertet ihr «{measure}» — Chancen, Risiken, Bedingungen?"
+    else:
+        ask = f"How do you assess «{measure}» — upsides, risks, conditions?"
+    return f"[Seed] Diskussionsimpuls: {thesis} {ask}"
