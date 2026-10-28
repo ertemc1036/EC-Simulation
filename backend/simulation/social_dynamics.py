@@ -27,6 +27,11 @@ evidenced. Labor live fixture ``20261028T115954Z-c16c749b`` markers.
 Phase 8.2 Stance Classification V2: soft-reject of unconditional rollout +
 support/caveats → ``conditional`` (fixture ``20261028T134318Z-ab541048``:
 Lehrerin Chancen + lehne flächendeckend ab; Eltern «nur unter Voraussetzungen»).
+
+Phase 8.3 Stance Classification V3: education live fixture
+``20261028T142011Z-d1fb1b1c`` — Thomas Bauer (Eltern): Potenzial +
+Voraussetzungen / Vollausrollung riskant → ``conditional``; soft-support +
+Evidenzlücke → ``conditional`` (nicht hart ``pro``).
 """
 from __future__ import annotations
 
@@ -35,8 +40,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-STANCE_CLASSIFIER = "v2"
-STANCE_QUALITY_FIX = "8.2"
+STANCE_CLASSIFIER = "v3"
+STANCE_QUALITY_FIX = "8.3"
 
 # Phase-5 social relations — only emit when evidenced.
 SOCIAL_RELATIONS = frozenset(
@@ -335,7 +340,7 @@ _TEXT_DISAGREE_MARKERS = (
 # Clear stance polarities (Phase 7.3: conditional replaces legacy «exception»).
 _CLEAR_POLARITIES = frozenset({"pro", "contra", "conditional", "exception"})
 
-# Explicit conditional / «nur wenn» stance (Phase 7.3 + 8.2).
+# Explicit conditional / «nur wenn» stance (Phase 7.3 + 8.2 + 8.3).
 _CONDITIONAL_MARKERS = (
     "unter der bedingung",
     "unter der voraussetzung",
@@ -369,6 +374,27 @@ _CONDITIONAL_MARKERS = (
     "volle lohnausgleich garantiert",
     "flexible umsetzung",
     "flexible modelle können helfen",
+    # Phase 8.3 education fixture d1fb1b1c — Thomas Bauer / Eltern.
+    "das setzt voraus",
+    "setzt voraus, dass",
+    "ohne diese voraussetzung",
+    "ohne diese voraussetzungen",
+    "ohne solche voraussetzung",
+    "ohne solche voraussetzungen",
+    "ohne eine solche ausgleich",
+    "ohne eine solche",
+    "ausgleichsmaßnahme",
+    "ausgleichsmassnahme",
+    "förderprogrammen für",
+    "foerderprogrammen für",
+    "muss die einführung",
+    "einhergehen",
+    "verantwortungsvoll eingeführt",
+    "wenn sie verantwortungsvoll",
+    "gerade deshalb muss",
+    "belastbare studien",
+    "vor der flächendeckenden",
+    "vor der flaechendeckenden",
 )
 
 # Soft reject of *unconditional / blanket* rollout while keeping caveated support
@@ -379,6 +405,8 @@ _SOFT_REJECT_UNCONDITIONAL = (
     "flächendeckend",
     "ungeprüfte vollausrollung",
     "ungepruefte vollausrollung",
+    "vollausrollung ohne",
+    "vollausrollung",
     "ohne klare evidenz",
     "ohne belastbare evidenz",
     "ohne pädagogische reflexion",
@@ -388,6 +416,10 @@ _SOFT_REJECT_UNCONDITIONAL = (
     "technikversprechen ohne",
     "nicht nur als technisches gadget",
     "kein bloßer technologie",
+    # Phase 8.3 — Thomas Bauer risk framing of blanket rollout.
+    "halte ich für riskant",
+    "für riskant",
+    "fuer riskant",
 )
 
 # Phrase-level only — bare «Chancen»/«Potenzial» appear in public seeds.
@@ -397,9 +429,28 @@ _SOFT_SUPPORT_SIGNAL = (
     "sehe ich das potenzial",
     "sehe das potenzial",
     "sehe ich das potenzial von",
+    "sehe ich großes potenzial",
+    "sehe ich grosses potenzial",
+    "großes potenzial in",
+    "grosses potenzial in",
+    "großes potenzial",
+    "grosses potenzial",
     "grundsätzlich positiv",
     "echte entlastung",
     "förderlich eingesetzt",
+)
+
+# Soft support + evidence gap / caveat → conditional (Phase 8.3), not hard pro.
+_EVIDENCE_CAVEAT_MARKERS = (
+    "fehlt mir bislang",
+    "fehlt bislang",
+    "fehlt eine klare evidenz",
+    "klare evidenz",
+    "allerdings fehlt",
+    "ohne dass wir mehr zeit",
+    "empirische evidenz",
+    "noch sehr begrenzt",
+    "datenlage",
 )
 
 
@@ -432,6 +483,10 @@ def _soft_support_signal(low: str) -> bool:
     return any(m in low for m in _SOFT_SUPPORT_SIGNAL)
 
 
+def _evidence_caveat(low: str) -> bool:
+    return any(m in low for m in _EVIDENCE_CAVEAT_MARKERS)
+
+
 def _polarity(text: str) -> str:
     """Coarse stance: pro/contra/conditional/uncertain/unknown (+ legacy exception).
 
@@ -441,6 +496,9 @@ def _polarity(text: str) -> str:
 
     Phase 8.2 (V2): soft-reject of unconditional rollout combined with support
     or caveat language → ``conditional`` (not hard ``contra``).
+
+    Phase 8.3 (V3): soft-support + Evidenzlücke/Voraussetzungen → ``conditional``
+    (Thomas Bauer / Lehrkraft Potenzial-mit-Vorbehalt, not hard ``pro``).
     """
     raw = text or ""
     if _is_seed_content(raw):
@@ -449,6 +507,9 @@ def _polarity(text: str) -> str:
     uncertain_hit = any(m in low for m in _UNCERTAIN_MARKERS)
 
     conditional_hit = sum(1 for m in _CONDITIONAL_MARKERS if m in low)
+    evidence_caveat = _evidence_caveat(low)
+    if evidence_caveat:
+        conditional_hit += 1
     pro = sum(1 for m in _PRO_MARKERS if m in low)
     if _PRO_BAN_RE.search(low):
         pro += 1
@@ -479,6 +540,9 @@ def _polarity(text: str) -> str:
 
     # Phase 8.2: Chancen/Potenzial + soft unconditional reject → conditional.
     if soft_reject and (_soft_support_signal(low) or conditional_hit or pro > 0):
+        return "conditional"
+    # Phase 8.3: soft support + evidence/condition caveats → conditional (not pro).
+    if _soft_support_signal(low) and (evidence_caveat or conditional_hit > 0):
         return "conditional"
     # Explicit conditional language wins when not a pure hard reject.
     if conditional_hit and not (contra > conditional_hit and not soft_reject):
@@ -511,7 +575,12 @@ def _polarity(text: str) -> str:
 
 
 def classify_stance_v2(text: str) -> str:
-    """Public Stance Classification V2 entry point (alias of ``_polarity``)."""
+    """Public Stance Classification V2/V3 entry point (alias of ``_polarity``)."""
+    return _polarity(text)
+
+
+def classify_stance_v3(text: str) -> str:
+    """Public Stance Classification V3 entry point (Phase 8.3)."""
     return _polarity(text)
 
 
@@ -877,8 +946,8 @@ class PositionTracker:
                 "Seed-Impulse und Erstposition ≠ Wechsel; position_changed / "
                 "influenced_by nur bei belegtem Stance-Wechsel "
                 "(Bestätigung / Ausnahme-Restatement zählen nicht). "
-                "Stance Classification V2 (Phase 8.2): soft-reject "
-                "flächendeckend/ungeprüft → conditional bei Chancen/Voraussetzungen."
+                "Stance Classification V3 (Phase 8.3): Potenzial + Voraussetzungen/"
+                "Evidenzlücke → conditional (Thomas Bauer / Lehrkraft-Fix)."
             ),
         }
 

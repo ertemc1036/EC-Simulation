@@ -142,8 +142,8 @@ const societyOverview = computed(() => {
     relationship_bonds: sim.value?.relationships?.bond_count ?? 0,
     opinion_rounds_tracked: sim.value?.opinion_dynamics?.rounds_tracked ?? 0,
     analytics_kpis: sim.value?.society_analytics?.kpis || {},
-    persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v3',
-    quality_fix: sim.value?.simulation_intelligence?.quality_fix || '8.2',
+    persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v4',
+    quality_fix: sim.value?.simulation_intelligence?.quality_fix || '8.3',
     planned_cost_usd: sim.value?.cost_plan?.planned_cost_usd ?? 0,
     planned_waves: sim.value?.cost_plan?.planned_waves ?? 0,
     scheduler_waves_executed: sim.value?.scheduler?.waves_executed ?? 0,
@@ -489,9 +489,9 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-8.2 Simulation Intelligence &amp; Debate Quality — Argument
-        Intelligence V2, Debate Engine V2, Stance Classification V2, Opinion
-        Dynamics V2, Quality Dashboard (Offline 10/25/50 × ≤4). Live-LLM bleibt
+        Phase-8.3 Realistic Agent Behavior — Persona Motivation V4,
+        Argument-Grounded Interaction V3, Stance Classification V3, Opinion
+        Dynamics V3, Interaction Quality (Offline 10/25/50 × ≤4). Live-LLM bleibt
         ≤5 · paid_llm_unlocked=false.
       </p>
     </header>
@@ -1035,11 +1035,11 @@ onUnmounted(() => {
     <section class="analytics" v-if="societyAnalytics || analyticsKpis">
       <h2>Society Analytics</h2>
       <p class="lede-sm">
-        Phase-8.2 Kennzahlen — Debate Quality, Stance V2, Opinion V2, Planner V3.
+        Phase-8.3 Kennzahlen — Interaction Quality, Stance V3, Opinion V3, Motivation V4.
         Offline-Scale {{ societyAnalytics?.scale?.agent_count ?? societyOverview?.agent_count ?? '—' }}
         Agenten × ≤{{ societyAnalytics?.scale?.offline_max_rounds ?? 4 }} Runden ·
         paid_llm_unlocked={{ societyAnalytics?.scale?.paid_llm_unlocked === false ? 'false' : '—' }}
-        · Persona {{ sim?.simulation_intelligence?.persona_engine || societyOverview?.persona_engine || 'v3' }}
+        · Persona {{ sim?.simulation_intelligence?.persona_engine || societyOverview?.persona_engine || 'v4' }}
       </p>
       <div class="society-grid" v-if="analyticsKpis">
         <div>
@@ -1068,8 +1068,16 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <h3>Quality Dashboard V2</h3>
+      <h3>Quality Dashboard V3</h3>
       <div class="society-grid" v-if="debateQuality || argumentIntelligence || simulationIntelligence">
+        <div>
+          <span class="k">Interaction Quality</span>
+          <span class="v mono">{{ sim?.interaction_quality?.score ?? simulationIntelligence?.kpis?.interaction_quality_score ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Grounded Reply %</span>
+          <span class="v mono">{{ sim?.interaction_quality?.argument_grounded?.grounded_reply_rate ?? simulationIntelligence?.kpis?.grounded_reply_rate ?? '—' }}</span>
+        </div>
         <div>
           <span class="k">Debate Quality</span>
           <span class="v mono">{{ debateQuality?.score ?? societyOverview?.debate_quality_score ?? '—' }}</span>
@@ -1087,8 +1095,8 @@ onUnmounted(() => {
           <span class="v mono">{{ argumentIntelligence?.mean_quality_score ?? simulationIntelligence?.kpis?.mean_argument_quality ?? '—' }}</span>
         </div>
         <div>
-          <span class="k">Address Rate</span>
-          <span class="v mono">{{ argumentIntelligence?.address_rate ?? debateQuality?.components?.address_rate ?? '—' }}</span>
+          <span class="k">Motivation Coverage</span>
+          <span class="v mono">{{ simulationIntelligence?.persona?.motivation_coverage ?? simulationIntelligence?.kpis?.persona_motivation_coverage ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Opinion Stability</span>
@@ -1097,6 +1105,10 @@ onUnmounted(() => {
         <div>
           <span class="k">Unknown Stance %</span>
           <span class="v mono">{{ simulationIntelligence?.stance?.unknown_share ?? simulationIntelligence?.kpis?.unknown_stance_share ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Invented Attr. %</span>
+          <span class="v mono">{{ sim?.interaction_quality?.argument_grounded?.invented_attribution_rate ?? simulationIntelligence?.kpis?.invented_attribution_rate ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Repetition Blocks</span>

@@ -8,6 +8,15 @@ export interface AgentProfile {
   age?: number | null
   occupation?: string | null
   role_label?: string | null
+  motivation?: {
+    values?: string[]
+    fears?: string[]
+    drivers?: string[]
+    decision_style?: string
+    conflict_axis?: string
+    domain?: string
+    role_key?: string
+  } | null
 }
 
 export interface ActionLogEntry {
@@ -283,6 +292,8 @@ export interface OpinionDynamicsSnapshot {
   stability_index?: number
   polarization?: number
   entropy?: number
+  grounded_reply_share?: number | null
+  motivation_coverage?: number | null
   unknown_share_by_round?: Array<{ step?: number; unknown_share?: number }>
   transitions?: Record<string, number>
   chronology?: Array<{
@@ -295,6 +306,24 @@ export interface OpinionDynamicsSnapshot {
     unknown_share?: number
     change_samples?: Array<Record<string, unknown>>
   }>
+  note?: string
+}
+
+export interface InteractionQualitySnapshot {
+  backend?: string
+  engine?: string
+  quality_fix?: string
+  score?: number
+  ok?: boolean
+  components?: Record<string, number>
+  argument_grounded?: {
+    engine?: string
+    grounded_reply_rate?: number
+    invented_attribution_rate?: number
+    mean_grounding_score?: number
+    reply_count?: number
+  }
+  persona_motivation?: Record<string, unknown>
   note?: string
 }
 
@@ -374,6 +403,8 @@ export interface SimulationIntelligence {
   stance_classifier?: string
   opinion_engine?: string
   argument_engine?: string
+  argument_grounded_engine?: string
+  interaction_quality_engine?: string
   paid_llm_unlocked?: boolean
   persona?: {
     engine?: string
@@ -383,6 +414,7 @@ export interface SimulationIntelligence {
     unique_occupations?: number
     unique_names?: number
     role_balance?: number
+    motivation_coverage?: number
     ok?: boolean
   }
   scheduler?: Record<string, unknown>
@@ -390,6 +422,7 @@ export interface SimulationIntelligence {
   discussion?: Record<string, unknown>
   stance?: Record<string, unknown>
   opinion?: Record<string, unknown>
+  interaction_quality?: InteractionQualitySnapshot
   debate_quality?: DebateQualitySnapshot
   cost_plan?: CostTokenPlan
   kpis?: Record<string, number>
@@ -431,6 +464,7 @@ export interface SimulationState {
   oasis_reply?: OasisReplyInfo
   scheduler?: SchedulerSnapshot
   interaction_engine?: InteractionEngineSnapshot
+  interaction_quality?: InteractionQualitySnapshot
   society_overview?: SocietyOverview
   discussion?: DiscussionSnapshot
   error: string | null

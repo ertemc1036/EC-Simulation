@@ -1,8 +1,8 @@
-"""Phase 8.0–8.2 — Simulation Intelligence (scaling + debate quality).
+"""Phase 8.0–8.3 — Simulation Intelligence (scaling + debate + realistic agents).
 
-Aggregates persona diversity V3, scheduler coverage/waves-in-execution,
-cost plan V3, interaction engine, debate quality V2, stance V2, and society
-signals. No provider calls.
+Aggregates persona motivation V4, scheduler coverage/waves-in-execution,
+cost plan V3, interaction engine, debate quality V2, stance V3, opinion V3,
+argument-grounded interaction V3, and interaction quality. No provider calls.
 """
 from __future__ import annotations
 
@@ -20,12 +20,14 @@ from backend.config import (
 from backend.simulation.cost_token_planner import CostTokenPlan
 
 
-QUALITY_FIX = "8.2"
-PERSONA_ENGINE = "v3"
+QUALITY_FIX = "8.3"
+PERSONA_ENGINE = "v4"
 DEBATE_ENGINE = "v2"
-STANCE_CLASSIFIER = "v2"
-OPINION_ENGINE = "v2"
+STANCE_CLASSIFIER = "v3"
+OPINION_ENGINE = "v3"
 ARGUMENT_ENGINE = "v2"
+GROUNDED_ENGINE = "v3"
+INTERACTION_QUALITY_ENGINE = "v3"
 
 
 def _unique_occupations(agents: list[dict[str, Any]]) -> int:
@@ -124,8 +126,9 @@ def build_simulation_intelligence(
     agent_positions: dict[str, Any] | None,
     interaction_engine: dict[str, Any] | None = None,
     opinion_dynamics: dict[str, Any] | None = None,
+    interaction_quality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compact Phase-8.2 intelligence snapshot for status + result JSON."""
+    """Compact Phase-8.3 intelligence snapshot for status + result JSON."""
     agents = agents or []
     n = max(1, int(agent_count) or len(agents) or 1)
     issues = _persona_issues(agents)
@@ -153,6 +156,7 @@ def build_simulation_intelligence(
     positions = agent_positions or {}
     iex = interaction_engine or {}
     opinion = opinion_dynamics or {}
+    iq = interaction_quality or disc.get("interaction_quality") or {}
     pol = positions.get("polarity_distribution") or {}
     unknown_share = float(pol.get("unknown") or 0) / max(
         1.0, float(sum(int(v) for v in pol.values()) or 1)
@@ -186,6 +190,20 @@ def build_simulation_intelligence(
         if opinion.get("stance_clarity") is not None
         else max(0.0, 1.0 - unclear_share)
     )
+    grounded = iq.get("argument_grounded") or disc.get("argument_grounded") or {}
+    mot_cov = float(
+        (iq.get("components") or {}).get("persona_motivation_coverage")
+        or (opinion.get("motivation_coverage") or 0.0)
+        or 0.0
+    )
+    if mot_cov <= 0.0:
+        with_mot = sum(
+            1
+            for a in agents
+            if (a.get("motivation") or {}).get("values")
+            or "Motivation:" in str(a.get("goal") or "")
+        )
+        mot_cov = round(with_mot / max(1, len(agents) or 1), 4)
 
     return {
         "phase": 8,
@@ -195,6 +213,8 @@ def build_simulation_intelligence(
         "stance_classifier": positions.get("stance_classifier") or STANCE_CLASSIFIER,
         "opinion_engine": opinion.get("engine") or OPINION_ENGINE,
         "argument_engine": arg_intel.get("engine") or ARGUMENT_ENGINE,
+        "argument_grounded_engine": grounded.get("engine") or GROUNDED_ENGINE,
+        "interaction_quality_engine": iq.get("engine") or INTERACTION_QUALITY_ENGINE,
         "backend": "local",
         "execution_kind": execution_kind,
         "paid_llm_unlocked": False,
@@ -206,6 +226,7 @@ def build_simulation_intelligence(
             "unique_names": name_n,
             "role_balance": balance,
             "diversity_score": diversity,
+            "motivation_coverage": mot_cov,
             "issue_flags": issues,
             "issue_count": len(issues),
             "ok": len(issues) == 0 and role_n >= min(3, n) and name_n == len(agents),
@@ -243,6 +264,8 @@ def build_simulation_intelligence(
             "mean_argument_quality": arg_intel.get("mean_quality_score", 0.0),
             "argument_diversity": arg_intel.get("argument_diversity", 0.0),
             "claim_kinds": arg_intel.get("claim_kinds") or {},
+            "grounded_reply_rate": grounded.get("grounded_reply_rate"),
+            "invented_attribution_rate": grounded.get("invented_attribution_rate"),
         },
         "stance": {
             "classifier": positions.get("stance_classifier") or STANCE_CLASSIFIER,
@@ -255,12 +278,20 @@ def build_simulation_intelligence(
         },
         "opinion": {
             "engine": opinion.get("engine") or OPINION_ENGINE,
-            "version": opinion.get("version", 2),
+            "version": opinion.get("version", 3),
             "stance_clarity": stance_clarity,
             "stability_index": opinion.get("stability_index"),
             "polarization": opinion.get("polarization"),
             "shift_rate_per_agent_round": opinion.get("shift_rate_per_agent_round", 0.0),
             "rounds_tracked": opinion.get("rounds_tracked", 0),
+            "grounded_reply_share": opinion.get("grounded_reply_share"),
+            "motivation_coverage": opinion.get("motivation_coverage", mot_cov),
+        },
+        "interaction_quality": iq
+        or {
+            "score": 0.0,
+            "engine": INTERACTION_QUALITY_ENGINE,
+            "quality_fix": QUALITY_FIX,
         },
         "debate_quality": debate_q
         or {
@@ -287,6 +318,7 @@ def build_simulation_intelligence(
         "kpis": {
             "persona_diversity": diversity,
             "persona_issues": len(issues),
+            "persona_motivation_coverage": mot_cov,
             "scheduler_self_hits": int(sched.get("self_as_partner_count") or 0),
             "waves_executed": waves_executed,
             "planned_waves": int(plan.get("planned_waves") or waves_planned or 0),
@@ -298,11 +330,16 @@ def build_simulation_intelligence(
             "argument_diversity": float(arg_intel.get("argument_diversity") or 0.0),
             "mean_argument_quality": float(arg_intel.get("mean_quality_score") or 0.0),
             "opinion_stability": float(opinion.get("stability_index") or 0.0),
+            "grounded_reply_rate": float(grounded.get("grounded_reply_rate") or 0.0),
+            "invented_attribution_rate": float(
+                grounded.get("invented_attribution_rate") or 0.0
+            ),
+            "interaction_quality_score": float(iq.get("score") or 0.0),
         },
         "note": (
-            "Simulation Intelligence (Phase 8.2): Argument Intelligence V2, "
-            "Debate Engine V2, Stance Classification V2, Opinion Dynamics V2, "
-            "Quality Dashboard — offline; Live-Ceilings unverändert; "
-            "paid_llm_unlocked=false."
+            "Simulation Intelligence (Phase 8.3): Persona Motivation V4, "
+            "Argument-Grounded Interaction V3, Stance Classification V3, "
+            "Opinion Dynamics V3, Interaction Quality — offline; "
+            "Live-Ceilings unverändert; paid_llm_unlocked=false."
         ),
     }
