@@ -19,6 +19,10 @@ Phase 5.2 (live-run 7f75d2e4):
 - Textual ``agrees_with`` / ``disagrees_with`` only with comment-ref evidence
 
 Phase 6: polarity distribution + scale-safe payloads for 10/25/50 offline.
+
+Phase 7.3.2: stance reliability — keep clear own polarity across agreement
+replies; distinguish Zustimmung (social) from own stance; change only when
+evidenced. Labor live fixture ``20261028T115954Z-c16c749b`` markers.
 """
 from __future__ import annotations
 
@@ -71,6 +75,12 @@ _EXCEPTION_MARKERS = (
     "plädiere für pilot",
     "abbruchkriterien",
     "schrittweise einführung",
+    # Live Vier-Tage transitions (Phase 7.3.2).
+    "übergangsregelung",
+    "uebergangsregelung",
+    "übergangsphase",
+    "uebergangsphase",
+    "branchenspezifisch",
 )
 
 # Pro toward the ban / measure — avoid matching "Unterstützung" (aid).
@@ -98,6 +108,13 @@ _PRO_MARKERS = (
     # Live Vier-Tage-Woche (Phase 7.3.1 fixture bdfb9e9d).
     "grundsätzlich positiv",
     "lebensqualität verbessert",
+    # Live Vier-Tage (Phase 7.3.2 fixture c16c749b) — clear worker support.
+    "wichtigen schritt",
+    "lebensqualität der beschäftigten",
+    "echte entlastung",
+    "volle entlastung",
+    "lebensstandard sichern",
+    "produktivität und zufriedenheit",
     "support the ban",
     "agree with the ban",
 )
@@ -168,6 +185,12 @@ _CONTRA_MARKERS = (
     "mehrkosten, die ohne gegenfinanzierung",
     "ohne klaren finanzierungsmodellen",
     "solange keine klaren finanzierungsmodelle",
+    # Live Vier-Tage company critique (Phase 7.3.2).
+    "betriebliche risiken",
+    "personellen engpässen",
+    "kostensteigerungen",
+    "kaum praktikabel",
+    "produktionsausfälle",
 )
 
 # Balanced BGE / measure stance: support + incentive / wage caveats (not full contra).
@@ -215,6 +238,13 @@ _CONFIRM_MARKERS = (
     "unterschreibe",
     "likewise",
     "agree with that",
+    # Acknowledgement / Zustimmung ≠ own stance flip (Phase 7.3.2).
+    "nachvollziehbar",
+    "wichtigen punkt an",
+    "zentrales problem an",
+    "zentrales wirtschaftliches risiko an",
+    "sprechen ein zentrales",
+    "spricht ein zentrales",
 )
 
 _UNCERTAIN_MARKERS = (
@@ -262,6 +292,15 @@ _TEXT_AGREE_MARKERS = (
     "unterschreibe",
     "likewise",
     "agree with",
+    # Live acknowledgment of another's point (Zustimmung, not own flip).
+    "nachvollziehbar",
+    "wichtigen punkt an",
+    "zentrales problem an",
+    "zentrales wirtschaftliches risiko an",
+    "sprechen ein zentrales",
+    "spricht ein zentrales",
+    "deine sorgen",
+    "ihre sorgen",
 )
 
 _TEXT_DISAGREE_MARKERS = (
@@ -301,6 +340,12 @@ _CONDITIONAL_MARKERS = (
     "nur mit ausnahmen",
     "nur mit übergangs",
     "nur mit uebergangs",
+    # Live Vier-Tage caveats (Phase 7.3.2).
+    "lohnausgleich wirklich hält",
+    "lohnausgleich garantiert",
+    "volle lohnausgleich garantiert",
+    "flexible umsetzung",
+    "flexible modelle können helfen",
 )
 
 
@@ -390,6 +435,17 @@ def _is_confirmation(text: str) -> bool:
 def _is_explicit_shift(text: str) -> bool:
     low = (text or "").lower()
     return any(m in low for m in _SHIFT_MARKERS)
+
+
+def _is_agreement_reply(content: str) -> bool:
+    """True when text acknowledges another comment (Zustimmung ≠ own stance)."""
+    raw = content or ""
+    if not extract_local_comment_refs(raw):
+        return False
+    low = raw.lower()
+    return any(m in low for m in _TEXT_AGREE_MARKERS) or any(
+        m in low for m in _CONFIRM_MARKERS
+    )
 
 
 def classify_textual_agree_disagree(content: str) -> list[str]:
@@ -531,6 +587,8 @@ class PositionTracker:
         self.seed_from_goals(agents, step=step if step is not None else 0)
         # Latest statement per agent (comment preferred over older post).
         # Manual [Seed / …] posts are ignored for stance establishment.
+        # Phase 7.3.2: agreement/ack replies must not erase a clearer own stance
+        # when they classify as unknown/uncertain without evidenced mind-change.
         latest: dict[int, tuple[str, str, str]] = {}
         for p in posts:
             uid = p.get("user_id")
@@ -549,7 +607,26 @@ class PositionTracker:
                 continue
             # Preserve correct comment_id → author mapping for evidence.
             cid = c.get("comment_id")
-            latest[int(uid)] = (
+            aid = int(uid)
+            new_pol = _polarity(content)
+            prev_entry = latest.get(aid)
+            if prev_entry is not None:
+                prev_content = prev_entry[0]
+                prev_pol = _polarity(prev_content)
+                if (
+                    prev_pol in _CLEAR_POLARITIES | {"uncertain"}
+                    and new_pol in {"unknown", "uncertain"}
+                    and not _is_explicit_shift(content)
+                    and (
+                        _is_agreement_reply(content)
+                        or _is_confirmation(content)
+                        or new_pol == "unknown"
+                    )
+                ):
+                    # Keep prior own stance as the display/current position;
+                    # Zustimmung remains a social relation, not a stance wipe.
+                    continue
+            latest[aid] = (
                 content,
                 "comment",
                 f"comment:{cid}",
@@ -616,22 +693,25 @@ class PositionTracker:
                     new_polarity=pol,
                     content=content,
                 )
-                # Rephrase / confirmation: keep prior polarity for stability when
-                # confirmation restates without a real flip.
-                if not changed and _is_confirmation(content) and prev.polarity in {
-                    "pro",
-                    "contra",
-                    "exception",
-                    "uncertain",
-                    "unknown",
-                }:
-                    pol = prev.polarity
-                    key = _stance_key(pol, stance)
-                # Same-side Ausnahme restatement: keep exception polarity even
-                # when a later comment is marker-sparse (avoid unknown drift).
+                # Rephrase / confirmation / Zustimmung: keep prior polarity when
+                # the reply acknowledges another agent without an evidenced flip.
                 if (
                     not changed
-                    and prev.polarity == "exception"
+                    and prev.polarity in _CLEAR_POLARITIES
+                    and (
+                        _is_confirmation(content)
+                        or _is_agreement_reply(content)
+                    )
+                    and pol in {"unknown", "uncertain"}
+                    and not _is_explicit_shift(content)
+                ):
+                    pol = prev.polarity
+                    key = _stance_key(pol, stance)
+                # Context stability (7.3.2): clear own stance must not drift to
+                # unknown/uncertain on marker-sparse follow-ups without a shift.
+                if (
+                    not changed
+                    and prev.polarity in _CLEAR_POLARITIES
                     and pol in {"unknown", "uncertain"}
                     and not _is_explicit_shift(content)
                 ):

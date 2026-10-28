@@ -243,7 +243,7 @@ class Settings:
                 "zep_integrated": False,
                 "intelligent_discussion": True,
                 "individual_personas": True,
-                "quality_fix": "7.3.1",
+                "quality_fix": "7.3.2",
             },
         }
 
