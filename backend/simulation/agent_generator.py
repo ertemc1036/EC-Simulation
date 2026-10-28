@@ -17,6 +17,11 @@ import re
 from dataclasses import replace
 
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
+from backend.simulation.topic_context import (
+    INSTRUCTION_TOKEN_STEMS,
+    detect_topic_domain,
+    measure_label,
+)
 
 # Offline/Scripted society ceiling (Phase 6). Live-LLM still clamps to 5 in engine.
 MAX_GENERATABLE_AGENTS = 50
@@ -62,15 +67,15 @@ _ARCHETYPES: list[dict[str, str]] = [
     {
         "slug": "historian",
         "name": "Historiker",
-        "description": "Vergleicht mit früheren Stadtentwicklungen und Politikzyklen.",
+        "description": "Vergleicht mit früheren Politikzyklen und Reformpfaden.",
         "goal": "Pfadabhängigkeiten und Lernmomente aus der Vergangenheit markieren.",
         "style": "kontextreich, vergleichend",
     },
     {
         "slug": "engineer",
         "name": "Ingenieur",
-        "description": "Prüft technische Machbarkeit, Kapazität und Infrastruktur.",
-        "goal": "Technische Engpässe und realistische Ausbaupfade benennen.",
+        "description": "Prüft technische und organisatorische Machbarkeit.",
+        "goal": "Engpässe und realistische Umsetzungspfade benennen.",
         "style": "sachlich, spezifikationsnah",
     },
     {
@@ -96,21 +101,35 @@ _ARCHETYPES: list[dict[str, str]] = [
     },
 ]
 
+
+def _archetype_for_domain(arch: dict[str, str], domain: str) -> dict[str, str]:
+    """Topic-specific archetype voice — no mobility leftovers on income theses."""
+    out = dict(arch)
+    slug = arch.get("slug") or ""
+    if domain == "income":
+        income_desc = {
+            "historian": "Vergleicht mit früheren Sozialreformen und Transfermodellen.",
+            "engineer": "Prüft Auszahlungslogistik, Verwaltungskapazität und IT-Systeme.",
+            "activist": "Drängt auf zügige Einführung ohne Verwässerung des Grundeinkommens.",
+            "skeptic": "Misstraut Finanzierungsannahmen und Arbeitsanreiz-Prognosen.",
+            "builder": "Schlägt Piloten mit klaren Abbruchkriterien für Transfers vor.",
+        }
+        if slug in income_desc:
+            out["description"] = income_desc[slug]
+    elif domain == "mobility":
+        mobility_desc = {
+            "historian": "Vergleicht mit früheren Stadtentwicklungen und Politikzyklen.",
+            "engineer": "Prüft technische Machbarkeit, Kapazität und Infrastruktur.",
+        }
+        if slug in mobility_desc:
+            out["description"] = mobility_desc[slug]
+    return out
+
+
 # Role → persona framing when the scenario names stakeholders explicitly.
-# ``conflict`` is a hard stance that clashes with other roles (Phase 3.5).
-_ROLE_PERSONAS: dict[str, dict[str, str]] = {
+# Mobility-specific copy lives only under domain=="mobility".
+_ROLE_PERSONAS_MOBILITY: dict[str, dict[str, str]] = {
     "bürger": {
-        "name": "Bürgerstimme",
-        "slug": "buerger",
-        "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
-        "goal": "Alltagsfolgen und Gerechtigkeit für Anwohnende sichtbar machen.",
-        "conflict": (
-            "Fordere soziale Abfederung und Ausnahmen für mobilitätseingeschränkte "
-            "Menschen; widersprich Wirtschaftsargumenten ohne Alltagsbezug."
-        ),
-        "style": "direkt, erfahrungsbezogen, pragmatisch",
-    },
-    "buerger": {
         "name": "Bürgerstimme",
         "slug": "buerger",
         "description": "Spricht für Alltag, Mobilität und Lebensqualität der Stadtbevölkerung.",
@@ -189,6 +208,147 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         ),
         "style": "praktisch, kundenbezogen",
     },
+}
+
+_ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
+    "bürger": {
+        "name": "Bürgerstimme",
+        "slug": "buerger",
+        "description": "Spricht für Alltagssicherheit und Teilhabe der Bevölkerung.",
+        "goal": "Existenzsicherung und Gerechtigkeit für Haushalte sichtbar machen.",
+        "conflict": (
+            "Befürworte verlässliche Absicherung; widersprich Kürzungsargumenten "
+            "ohne Alltagsbezug."
+        ),
+        "style": "direkt, erfahrungsbezogen, pragmatisch",
+    },
+    "arbeitnehmer": {
+        "name": "Arbeitnehmerstimme",
+        "slug": "arbeitnehmer",
+        "description": "Vertritt abhängig Beschäftigte und Lohn-Anreiz-Fragen.",
+        "goal": "Arbeitsanreize und Absicherung fair ausbalancieren.",
+        "conflict": (
+            "Unterstütze Grundeinkommen als Absicherung, aber fordere klare "
+            "Kompatibilität mit Löhnen; lehne Modelle ab, die Vollzeit entwerten."
+        ),
+        "style": "klar, lohnbezogen, pragmatisch",
+    },
+    "arbeitslose": {
+        "name": "Arbeitslosenstimme",
+        "slug": "arbeitslose",
+        "description": "Spricht aus Sicht von Menschen ohne Erwerbsarbeit.",
+        "goal": "Würde und Planbarkeit ohne Sanktionsdruck stärken.",
+        "conflict": (
+            "Befürworte bedingungslose Absicherung; widersprich Sanktions- und "
+            "Zwangsarbeit-Narrativen."
+        ),
+        "style": "direkt, menschenwürdig, fordernd",
+    },
+    "studierende": {
+        "name": "Studierendenstimme",
+        "slug": "studierende",
+        "description": "Fokussiert Bildung, Nebenjobs und Studienfinanzierung.",
+        "goal": "Studium ohne prekäre Nebenjobs ermöglichen.",
+        "conflict": (
+            "Unterstütze Grundeinkommen für Planungssicherheit im Studium; "
+            "widersprich Altersgrenzen, die Studierende ausschließen."
+        ),
+        "style": "sachlich, zukunftsbezogen",
+    },
+    "unternehmer": {
+        "name": "Unternehmerstimme",
+        "slug": "unternehmer",
+        "description": "Vertritt Gründer und Betriebsrisiken bei Transfers.",
+        "goal": "Finanzierbarkeit und Fachkräfteanreize prüfen.",
+        "conflict": (
+            "Lehne ungeprüfte Vollauszahlung ab; fordere Piloten und "
+            "Gegenfinanzierung; widersprich Versprechen ohne Steuerkonzept."
+        ),
+        "style": "kostenbewusst, nüchtern",
+    },
+    "unternehmen": {
+        "name": "Unternehmensvertretung",
+        "slug": "unternehmen",
+        "description": "Vertritt Betriebe bei Lohnkosten und Planungssicherheit.",
+        "goal": "Wirtschaftliche Risiken und praktikable Übergänge benennen.",
+        "conflict": (
+            "Fordere Übergangsregeln und Gegenfinanzierung; widersprich "
+            "pauschalen Transfers ohne Arbeitsmarktanalyse."
+        ),
+        "style": "kostenbewusst, lösungsorientiert, nüchtern",
+    },
+    "rentner": {
+        "name": "Rentnerstimme",
+        "slug": "rentner",
+        "description": "Betont Altersarmut und Kaufkraft im Ruhestand.",
+        "goal": "Altersarmut mindern ohne Rentenlogik zu zerstören.",
+        "conflict": (
+            "Befürworte Aufstockung bei Niedrigrenten; widersprich Kürzungen "
+            "bestehender Ansprüche."
+        ),
+        "style": "ruhig, gerechtigkeitsbezogen",
+    },
+    "selbststaendige": {
+        "name": "Selbstständigenstimme",
+        "slug": "selbststaendige",
+        "description": "Spricht für Solo-Selbstständige und Auftragsschwankungen.",
+        "goal": "Einkommensschwankungen absichern ohne Bürokratiechaos.",
+        "conflict": (
+            "Unterstütze stabile Basisabsicherung; fordere klare Regeln für "
+            "Selbstständige; lehne Modelle ab, die Beiträge verdoppeln."
+        ),
+        "style": "praktisch, risikobewusst",
+    },
+    "politiker": {
+        "name": "Politikstimme",
+        "slug": "politiker",
+        "description": "Wägt Mehrheiten, Recht und Haushaltsregeln ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "zwischen sozialer Absicherung und Haushaltsgrenzen."
+        ),
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
+    "politik": {
+        "name": "Politikstimme",
+        "slug": "politik",
+        "description": "Wägt Mehrheiten, Recht und Haushaltsregeln ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "zwischen sozialer Absicherung und Haushaltsgrenzen."
+        ),
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
+    "oekonomen": {
+        "name": "Ökonomenstimme",
+        "slug": "oekonomen",
+        "description": "Prüft Anreiz-, Inflations- und Finanzierungseffekte.",
+        "goal": "Empirische Risiken und Annahmen offenlegen.",
+        "conflict": (
+            "Stelle Finanzierungs- und Inflationsrisiken heraus; unterstütze "
+            "nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+        ),
+        "style": "analytisch, vorsichtig",
+    },
+    "oekonom": {
+        "name": "Ökonomenstimme",
+        "slug": "oekonom",
+        "description": "Prüft Anreiz-, Inflations- und Finanzierungseffekte.",
+        "goal": "Empirische Risiken und Annahmen offenlegen.",
+        "conflict": (
+            "Stelle Finanzierungs- und Inflationsrisiken heraus; unterstütze "
+            "nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+        ),
+        "style": "analytisch, vorsichtig",
+    },
+}
+
+# Backward-compatible alias (mobility defaults for older imports/tests).
+_ROLE_PERSONAS: dict[str, dict[str, str]] = {
+    **_ROLE_PERSONAS_MOBILITY,
+    "buerger": dict(_ROLE_PERSONAS_MOBILITY["bürger"]),
 }
 
 _FIRST_NAMES = [
@@ -374,6 +534,7 @@ _ROLE_CANON: dict[str, str] = {
     "buergern": "Bürger",
     "burger": "Bürger",
     "unternehmen": "Unternehmen",
+    "unternehmer": "Unternehmer",
     "politiker": "Politiker",
     "politik": "Politik",
     "verkehrsbetriebe": "Verkehrsbetriebe",
@@ -387,9 +548,31 @@ _ROLE_CANON: dict[str, str] = {
     "polizei": "Polizei",
     "taxi": "Taxi",
     "lieferdienste": "Lieferdienste",
+    "arbeitnehmer": "Arbeitnehmer",
+    "arbeitslose": "Arbeitslose",
+    "studierende": "Studierende",
+    "studenten": "Studierende",
+    "rentner": "Rentner",
+    "selbststaendige": "Selbstständige",
+    "selbständige": "Selbstständige",
+    "oekonomen": "Ökonomen",
+    "okonomen": "Ökonomen",
+    "oekonom": "Ökonomen",
+    "ökonom": "Ökonomen",
+    "ökonomen": "Ökonomen",
 }
 
 _DEFAULT_STAKEHOLDERS = ("Bürger", "Unternehmen", "Politik")
+_DEFAULT_STAKEHOLDERS_INCOME = (
+    "Arbeitnehmer",
+    "Arbeitslose",
+    "Studierende",
+    "Unternehmer",
+    "Rentner",
+    "Selbstständige",
+    "Politiker",
+    "Ökonomen",
+)
 
 # Instruction / test-prompt stems that must never become agent names.
 _INSTRUCTION_STEMS = (
@@ -477,12 +660,26 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
         roles.append(cleaned)
         return True
 
+    domain = detect_topic_domain(text)
+
     # 1) Lexicon first — order of appearance in the scenario.
+    # Longer / more specific forms before shorter prefixes (Unternehmer > Unternehmen).
     lexicon = [
+        "Selbstständige",
+        "Selbständige",
+        "Arbeitnehmer",
+        "Arbeitslose",
+        "Studierende",
+        "Studenten",
+        "Unternehmer",
+        "Unternehmen",
+        "Ökonomen",
+        "Oekonomen",
+        "Ökonom",
+        "Rentner",
         "Bürgern",
         "Bürger",
         "Buerger",
-        "Unternehmen",
         "Politiker",
         "Politik",
         "Verkehrsbetriebe",
@@ -509,20 +706,23 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
             found.append((m.start(), role))
     found.sort(key=lambda x: x[0])
     for _idx, role in found:
+        # On income theses, bare «Bürger» as legal recipient is weak vs. named groups.
+        if domain == "income" and _role_key(role) in {"buerger", "buergern", "burger"}:
+            continue
         _add(role)
         if len(roles) >= limit:
             return roles[:limit]
 
-    # 2) «zwischen A, B und C» stakeholder lists (common in DE prompts).
+    # 2) «zwischen A, B und C» / «Berücksichtige A, B und C» stakeholder lists.
     for match in re.finditer(
-        r"zwischen\s+(.+?)(?:\.|\?|$)",
+        r"(?:zwischen|berücksichtige|beruecksichtige|inkludiere|include)\s+(.+?)(?:\.|\?|$)",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     ):
         chunk = match.group(1)
         # Stop at clause verbs that start instruction tails.
         chunk = re.split(
-            r"\b(?:untersuche|simuliere|prüfe|analysiere)\b",
+            r"\b(?:untersuche|simuliere|prüfe|analysiere|und\s+menschen)\b",
             chunk,
             maxsplit=1,
             flags=re.IGNORECASE,
@@ -552,7 +752,12 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
 
     # 4) Deterministic fallbacks when the prompt only names the debate topic.
     if not roles:
-        for role in _DEFAULT_STAKEHOLDERS:
+        fallback = (
+            _DEFAULT_STAKEHOLDERS_INCOME
+            if domain == "income"
+            else _DEFAULT_STAKEHOLDERS
+        )
+        for role in fallback:
             _add(role)
             if len(roles) >= limit:
                 break
@@ -577,11 +782,18 @@ def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
             "buergern",
             "burger",
             "unternehmen",
+            "unternehmer",
             "politiker",
             "politik",
             "verkehrsbetriebe",
             "anwohnende",
             "handel",
+            "arbeitnehmer",
+            "arbeitslose",
+            "studierende",
+            "rentner",
+            "selbststaendige",
+            "oekonomen",
         }
     )
     tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9-]{3,}", scenario or "")
@@ -596,6 +808,8 @@ def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
             .replace("ß", "ss")
         )
         if low in _STOP or low in seen or norm in role_norms:
+            continue
+        if any(stem in norm for stem in INSTRUCTION_TOKEN_STEMS):
             continue
         seen.add(low)
         score = 0
@@ -659,16 +873,47 @@ def _unique_suffix(scenario: str, agent_id: int, slug: str) -> str:
     return digest[:6]
 
 
-def _persona_for_role(role: str, arch_fallback: dict[str, str]) -> dict[str, str]:
-    key = (
-        role.lower()
-        .replace("ü", "ue")
-        .replace("ö", "oe")
-        .replace("ä", "ae")
-        .replace("ß", "ss")
-    )
-    if key in _ROLE_PERSONAS:
-        return dict(_ROLE_PERSONAS[key])
+def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
+    if domain == "income":
+        table = dict(_ROLE_PERSONAS_INCOME)
+        # Alias ü/oe spellings.
+        table["buerger"] = dict(table["bürger"])
+        table["oekonomen"] = dict(table["oekonomen"])
+        return table
+    if domain == "mobility":
+        table = dict(_ROLE_PERSONAS_MOBILITY)
+        table["buerger"] = dict(table["bürger"])
+        return table
+    # Generic: income-style citizen/politics without mobility leaks.
+    table = {
+        "bürger": {
+            "name": "Bürgerstimme",
+            "slug": "buerger",
+            "description": "Spricht für Alltag und Lebensqualität der Bevölkerung.",
+            "goal": "Alltagsfolgen und Gerechtigkeit sichtbar machen.",
+            "conflict": (
+                "Fordere soziale Abfederung; widersprich Argumenten ohne Alltagsbezug."
+            ),
+            "style": "direkt, erfahrungsbezogen, pragmatisch",
+        },
+        "unternehmen": dict(_ROLE_PERSONAS_INCOME["unternehmen"]),
+        "politiker": dict(_ROLE_PERSONAS_INCOME["politiker"]),
+        "politik": dict(_ROLE_PERSONAS_INCOME["politik"]),
+    }
+    table["buerger"] = dict(table["bürger"])
+    return table
+
+
+def _persona_for_role(
+    role: str,
+    arch_fallback: dict[str, str],
+    *,
+    domain: str = "generic",
+) -> dict[str, str]:
+    key = _role_key(role)
+    table = _persona_table_for_domain(domain)
+    if key in table:
+        return dict(table[key])
     # Generic role → blend with archetype voice but keep role identity.
     return {
         "name": role[:1].upper() + role[1:],
@@ -714,30 +959,33 @@ def generate_dynamic_agents(
     must pass ``max_agents=LIVE_LLM_MAX_AGENTS`` (5).
     """
     n = max(1, min(int(count), int(max_agents), MAX_GENERATABLE_AGENTS))
+    domain = detect_topic_domain(scenario)
     # Stakeholder roles first; remainder filled by archetypes (deterministic).
     roles = extract_stakeholder_roles(scenario, limit=min(n, 12))
     keywords = extract_scenario_keywords(scenario)
     topic = _topic_phrase(keywords)
+    measure = measure_label(scenario, domain)
     short = (scenario or "").strip()[:120] or "Offenes Diskussionsthema"
     profiles: list[AgentProfile] = []
     used_names: set[str] = set()
     used_user_names: set[str] = set()
 
     for i in range(n):
-        arch = _ARCHETYPES[i % len(_ARCHETYPES)]
+        arch = _archetype_for_domain(_ARCHETYPES[i % len(_ARCHETYPES)], domain)
         voice_id = _unique_suffix(short, i, arch["slug"])
         if i < len(roles):
-            persona = _persona_for_role(roles[i], arch)
+            persona = _persona_for_role(roles[i], arch, domain=domain)
             display = persona["name"]
             # Disambiguate if the same role maps twice.
             if display.lower() in used_names:
                 display = f"{persona['name']} {i + 1}"
             user_name = f"{persona['slug']}_{voice_id}"
             description = (
-                f"{persona['description']} Bezieht Positionen explizit auf «{topic}» "
-                f"im Szenario: {short}. Stimme #{i + 1}/{n} ({voice_id})."
+                f"{persona['description']} Perspektive zu «{measure}» "
+                f"(Thema: {topic}). Stimme #{i + 1}/{n} ({voice_id})."
             )
             conflict = persona.get("conflict") or _archetype_conflict(arch)
+            # Goal stays instruction-only (never copied into public posts).
             goal = (
                 f"{persona['goal']} Zielkonflikt: {conflict} Thema: {topic}. "
                 f"[id={voice_id}]"
@@ -750,8 +998,8 @@ def generate_dynamic_agents(
                 display = f"{first} {arch['name']} {voice_id}"
             user_name = f"{_slugify(first)}_{arch['slug']}_{voice_id}"
             description = (
-                f"{arch['description']} Bezieht Positionen explizit auf «{topic}» "
-                f"im Szenario: {short}. Stimme #{i + 1}/{n} ({voice_id})."
+                f"{arch['description']} Perspektive zu «{measure}» "
+                f"(Thema: {topic}). Stimme #{i + 1}/{n} ({voice_id})."
             )
             goal = (
                 f"{arch['goal']} Zielkonflikt: {_archetype_conflict(arch)} "

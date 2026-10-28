@@ -44,7 +44,7 @@ _COMMENT_REF_RE = re.compile(
 )
 _SEED_CONTENT_RE = re.compile(r"^\[Seed\s*/", re.IGNORECASE)
 
-# Stable stance: demands exceptions / transition rules vs. a full ban.
+# Stable stance: demands exceptions / transition rules / pilots vs. full measure.
 _EXCEPTION_MARKERS = (
     "ausnahmeregel",
     "ausnahmeregelungen",
@@ -62,6 +62,10 @@ _EXCEPTION_MARKERS = (
     "mobilitätseingeschränkte",
     "mobilitaetseingeschraenkte",
     "anwohnerpark",
+    "pilot mit",
+    "piloten und",
+    "abbruchkriterien",
+    "schrittweise einführung",
 )
 
 # Pro toward the ban / measure — avoid matching "Unterstützung" (aid).
@@ -71,32 +75,44 @@ _PRO_MARKERS = (
     "bin für das",
     "bin für ein",
     "ja zum verbot",
+    "ja zum grundeinkommen",
     "pro verbot",
+    "pro grundeinkommen",
     "sinnvolles verbot",
+    "existenzsicherung ohne sanktionsdruck",
     "support the ban",
     "agree with the ban",
 )
-# Verb support for the ban; allows a short adverb between verb and object.
+# Verb support for ban / BGE / generic measure.
 _PRO_BAN_RE = re.compile(
     r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot|"
     r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:die\s+)?maßnahme|"
-    r"befürworte?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot",
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:das\s+)?grundeinkommen|"
+    r"befürworte?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot|"
+    r"befürworte?\s+(?:\w+\s+){0,2}(?:ein\s+|das\s+)?grundeinkommen",
     re.IGNORECASE,
 )
 
-# Contra toward a full / blanket ban (not goal-instruction "widersprich X").
+# Contra toward a full / blanket ban or unchecked BGE rollout.
 _CONTRA_MARKERS = (
     "dagegen",
     "ablehn",
     "lehne das verbot ab",
     "lehnen das verbot ab",
+    "lehne das grundeinkommen ab",
+    "lehnen das grundeinkommen ab",
     "lehne ab",
     "nein zum",
     "gegen das verbot",
     "gegen ein verbot",
+    "gegen das grundeinkommen",
+    "gegen ungeprüfte",
     "pauschale verbote",
     "pauschales verbot",
     "pauschalen verboten",
+    "ungeprüfte vollauszahlung",
+    "ohne gegenfinanzierung",
+    "ohne finanzierungsnachweis",
     "mit sorge",
     "gefährden arbeitsplätze",
     "gefährdet",

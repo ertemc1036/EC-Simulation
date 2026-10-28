@@ -596,6 +596,7 @@ class SimulationEngine:
             self._opinion = OpinionDynamics()
             self._scheduler = SocialInteractionScheduler(scenario=scenario.strip())
             ScriptedReactiveModel.shared_scheduler = self._scheduler
+            ScriptedReactiveModel.shared_scenario = scenario.strip()
             self._limit_stop = False
             self._failed = False
             self._custom_prompts_verified = False
@@ -1545,7 +1546,9 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 7,
+                "quality_fix": "7.1",
                 "execution_kind": self._execution_kind,
+                "content_synthetic": self._execution_kind in {"manual", "scripted"},
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
                 "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
@@ -1603,6 +1606,9 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
+                    "quality_fix": "7.1",
+                    "topic_aware_personas": True,
+                    "synthetic_offline_content": True,
                 },
             },
             "agents": self.state.agents,
