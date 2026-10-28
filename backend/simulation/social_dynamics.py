@@ -1,8 +1,16 @@
-"""Phase 5 — Social Dynamics: persistent positions + local comment refs.
+"""Phase 5 / 5.1 — Social Dynamics: persistent positions + local comment refs.
 
 OASIS has no ``parent_comment_id``. Local references (``→Kommentar#N``,
 ``Kommentar#N``, ``comment_id=N`` in comment content) plus like/dislike
 evidence drive social relations. No invented edges.
+
+Phase 5.1 accuracy rules:
+- Erstposition (goal seed → first platform statement) is not a change
+- ``position_changed`` only on evidenced polarity/stance shifts
+- Confirmations are not changes
+- ``unknown`` / ``uncertain`` when polarity is unclear
+- ``influenced_by`` only after a real change + direct interaction evidence
+- No double-counting; comment-id → author mapping must resolve correctly
 """
 from __future__ import annotations
 
@@ -39,18 +47,22 @@ _PRO_MARKERS = (
     "support",
     "agree",
     "förder",
+    "große chance",
 )
 _CONTRA_MARKERS = (
     "dagegen",
     "ablehn",
     "widersprich",
+    "widerspreche",
     "nein zum",
     "gegen ",
     "unsinn",
     "schädlich",
+    "problematisch",
     "oppose",
     "disagree",
     "protest",
+    "gefährdet",
 )
 _SHIFT_MARKERS = (
     "umdenken",
@@ -62,6 +74,35 @@ _SHIFT_MARKERS = (
     "überzeugt",
     "einlenk",
     "kompromiss",
+    "ändere meine position",
+    "position nach dem",
+)
+_CONFIRM_MARKERS = (
+    "bestätigt",
+    "bestaetigt",
+    "stimmt,",
+    "stimmt dass",
+    "stimmt, dass",
+    "sehr richtig",
+    "einverstanden",
+    "teile diese",
+    "genau das",
+    "ebenso",
+    "unterschreibe",
+    "likewise",
+    "agree with that",
+)
+_UNCERTAIN_MARKERS = (
+    "unsicher",
+    "unklar",
+    "weiß nicht",
+    "weiss nicht",
+    "vielleicht",
+    "ungewiss",
+    "uncertain",
+    "keine klare",
+    "offen lassen",
+    "noch offen",
 )
 
 
@@ -78,7 +119,10 @@ def extract_local_comment_refs(content: str) -> list[int]:
 
 
 def _polarity(text: str) -> str:
+    """Coarse stance polarity including unknown/uncertain (Phase 5.1)."""
     low = (text or "").lower()
+    if any(m in low for m in _UNCERTAIN_MARKERS):
+        return "uncertain"
     pro = sum(1 for m in _PRO_MARKERS if m in low)
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
     if pro > contra:
@@ -87,17 +131,71 @@ def _polarity(text: str) -> str:
         return "contra"
     if any(m in low for m in _SHIFT_MARKERS):
         return "shifting"
-    return "neutral"
+    # No clear markers → unknown (not a synthetic 'neutral' that flips every edit).
+    return "unknown"
+
+
+def _is_confirmation(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in _CONFIRM_MARKERS)
+
+
+def _is_explicit_shift(text: str) -> bool:
+    low = (text or "").lower()
+    return any(m in low for m in _SHIFT_MARKERS)
 
 
 def _stance_key(polarity: str, snippet: str) -> str:
+    # Key is polarity-primary so rephrasings of the same stance do not look
+    # like changes. Snippet digest only disambiguates display history.
     digest = hashlib.sha1((snippet or "").encode("utf-8")).hexdigest()[:8]
     return f"{polarity}:{digest}"
+
+
+def _coarse_key(polarity: str) -> str:
+    return polarity
 
 
 def _short(text: str, limit: int = 140) -> str:
     t = " ".join((text or "").split())
     return t if len(t) <= limit else t[: limit - 1] + "…"
+
+
+def _is_evidenced_change(
+    *,
+    prev_polarity: str,
+    new_polarity: str,
+    content: str,
+) -> bool:
+    """True only for a real stance shift — not confirmation or rephrase."""
+    if _is_confirmation(content) and not _is_explicit_shift(content):
+        return False
+    if prev_polarity == new_polarity:
+        # Same coarse polarity: only an explicit mind-change phrase counts,
+        # and only when polarity is not already a clear pro/contra lock.
+        return False
+    # unknown/uncertain → first clear pro/contra after establishment is a
+    # clarification, not a Meinungswechsel, unless the text signals a shift.
+    if prev_polarity in {"unknown", "uncertain"} and new_polarity in {
+        "pro",
+        "contra",
+    }:
+        return _is_explicit_shift(content)
+    if new_polarity in {"unknown", "uncertain"} and prev_polarity in {
+        "pro",
+        "contra",
+    }:
+        # Softening to uncertainty counts only with explicit shift language.
+        return _is_explicit_shift(content)
+    # Clear flip pro ↔ contra.
+    if {prev_polarity, new_polarity} == {"pro", "contra"}:
+        return True
+    # Entering/leaving "shifting" only with explicit mind-change language.
+    if "shifting" in {prev_polarity, new_polarity}:
+        return _is_explicit_shift(content)
+    if prev_polarity != new_polarity and _is_explicit_shift(content):
+        return True
+    return False
 
 
 @dataclass
@@ -125,11 +223,17 @@ class PositionTracker:
         self._current: dict[int, AgentPosition] = {}
         self._history: dict[int, list[AgentPosition]] = {}
         self._change_events: list[dict[str, Any]] = []
+        # Agents that already have a platform Erstposition (post/comment).
+        self._established: set[int] = set()
+        # Dedup keys for change events (agent, from_pol, to_pol, evidence).
+        self._change_keys: set[str] = set()
 
     def clear(self) -> None:
         self._current.clear()
         self._history.clear()
         self._change_events.clear()
+        self._established.clear()
+        self._change_keys.clear()
 
     def seed_from_goals(
         self, agents: list[Any], *, step: int | None = 0
@@ -186,14 +290,14 @@ class PositionTracker:
             content = str(c.get("content") or "").strip()
             if not content:
                 continue
+            # Preserve correct comment_id → author mapping for evidence.
+            cid = c.get("comment_id")
             latest[int(uid)] = (
                 content,
                 "comment",
-                f"comment:{c.get('comment_id')}",
+                f"comment:{cid}",
             )
 
-        # Who did this agent interact with recently (for influenced_by)?
-        interacted: dict[int, set[int]] = {aid: set() for aid in self._current}
         author_of_post = {
             int(p["post_id"]): int(p["user_id"])
             for p in posts
@@ -204,16 +308,19 @@ class PositionTracker:
             for c in comments
             if c.get("comment_id") is not None and c.get("user_id") is not None
         }
+
+        # Direct interaction evidence only (no invented influence via shared post).
+        interacted: dict[int, set[int]] = {aid: set() for aid in self._current}
         for r in reactions:
             uid = r.get("user_id")
             if uid is None:
                 continue
             aid = int(uid)
             target_author: int | None = None
-            if r.get("post_id") is not None:
-                target_author = author_of_post.get(int(r["post_id"]))
-            elif r.get("comment_id") is not None:
+            if r.get("comment_id") is not None:
                 target_author = author_of_comment.get(int(r["comment_id"]))
+            elif r.get("post_id") is not None:
+                target_author = author_of_post.get(int(r["post_id"]))
             if target_author is not None and target_author != aid:
                 interacted.setdefault(aid, set()).add(target_author)
         for c in comments:
@@ -221,30 +328,72 @@ class PositionTracker:
             if uid is None:
                 continue
             aid = int(uid)
-            for ref in extract_local_comment_refs(str(c.get("content") or "")):
+            content = str(c.get("content") or "")
+            for ref in extract_local_comment_refs(content):
                 target_author = author_of_comment.get(ref)
-                if target_author is not None and target_author != aid:
-                    interacted.setdefault(aid, set()).add(target_author)
-            # Flat OASIS reply under post still evidences response to post author.
-            pid = c.get("post_id")
-            if pid is not None:
-                target_author = author_of_post.get(int(pid))
+                # Only count refs that resolve to a real comment author.
                 if target_author is not None and target_author != aid:
                     interacted.setdefault(aid, set()).add(target_author)
 
         changes: list[dict[str, Any]] = []
         for aid, (content, kind, evid) in latest.items():
             pol = _polarity(content)
-            # Explicit shift markers force a polarity flip marker for change detect.
-            if any(m in content.lower() for m in _SHIFT_MARKERS) and pol == "neutral":
+            if (
+                any(m in content.lower() for m in _SHIFT_MARKERS)
+                and pol == "unknown"
+            ):
                 pol = "shifting"
             stance = _short(content)
             key = _stance_key(pol, stance)
             prev = self._current.get(aid)
-            changed = bool(prev and prev.stance_key != key)
+            first_platform = aid not in self._established
+            changed = False
             influencers: list[int] = []
-            if changed:
+
+            if first_platform:
+                # Erstposition: goal → first post/comment is establishment, not change.
+                changed = False
+            elif prev is not None:
+                changed = _is_evidenced_change(
+                    prev_polarity=prev.polarity,
+                    new_polarity=pol,
+                    content=content,
+                )
+                # Rephrase / confirmation: keep prior polarity for stability when
+                # confirmation restates without a real flip.
+                if not changed and _is_confirmation(content) and prev.polarity in {
+                    "pro",
+                    "contra",
+                    "uncertain",
+                    "unknown",
+                }:
+                    pol = prev.polarity
+                    key = _stance_key(pol, stance)
+
+            if changed and prev:
                 influencers = sorted(interacted.get(aid) or [])
+                dedup = f"{aid}|{prev.polarity}|{pol}|{evid}"
+                if dedup not in self._change_keys:
+                    self._change_keys.add(dedup)
+                    event = {
+                        "agent_id": aid,
+                        "from_stance": prev.stance,
+                        "to_stance": stance,
+                        "from_key": prev.stance_key,
+                        "to_key": key,
+                        "from_polarity": prev.polarity,
+                        "to_polarity": pol,
+                        "step": step,
+                        "evidence": evid,
+                        "influenced_by_agent_ids": influencers,
+                    }
+                    changes.append(event)
+                    self._change_events.append(event)
+                else:
+                    # Already recorded this evidenced transition — no double count.
+                    changed = False
+                    influencers = []
+
             pos = AgentPosition(
                 agent_id=aid,
                 stance=stance,
@@ -258,23 +407,14 @@ class PositionTracker:
                 previous_stance_key=prev.stance_key if changed and prev else None,
                 influenced_by_agent_ids=influencers,
             )
-            if changed and prev:
-                event = {
-                    "agent_id": aid,
-                    "from_stance": prev.stance,
-                    "to_stance": stance,
-                    "from_key": prev.stance_key,
-                    "to_key": key,
-                    "step": step,
-                    "evidence": evid,
-                    "influenced_by_agent_ids": influencers,
-                }
-                changes.append(event)
-                self._change_events.append(event)
             self._current[aid] = pos
+            self._established.add(aid)
             hist = self._history.setdefault(aid, [])
-            if not hist or hist[-1].stance_key != key:
+            if not hist or _coarse_key(hist[-1].polarity) != _coarse_key(pol):
                 hist.append(pos)
+            elif hist[-1].stance_key != key and kind != hist[-1].evidence_kind:
+                # Update latest history entry text without new polarity bucket.
+                hist[-1] = pos
         return changes
 
     def positions_payload(self) -> dict[str, Any]:
@@ -287,7 +427,8 @@ class PositionTracker:
             "changes": list(self._change_events),
             "note": (
                 "Persistente Agentenpositionen aus Goal-Seed + Posts/Kommentaren. "
-                "position_changed / influenced_by nur bei belegtem Stance-Wechsel."
+                "Erstposition ≠ Wechsel; position_changed / influenced_by nur bei "
+                "belegtem Stance-Wechsel (Bestätigung zählt nicht)."
             ),
         }
 
@@ -304,6 +445,8 @@ class PositionTracker:
                     "meta": {
                         "from_stance": ev.get("from_stance"),
                         "to_stance": ev.get("to_stance"),
+                        "from_polarity": ev.get("from_polarity"),
+                        "to_polarity": ev.get("to_polarity"),
                         "step": ev.get("step"),
                         "evidence": ev.get("evidence"),
                     },
@@ -317,7 +460,9 @@ class PositionTracker:
                         "target": f"actor:{int(other)}",
                         "meta": {
                             "step": ev.get("step"),
-                            "evidence": "position_change_after_interaction",
+                            "evidence": ev.get("evidence")
+                            or "position_change_after_interaction",
+                            "via": "reaction_or_local_comment_ref",
                         },
                     }
                 )
