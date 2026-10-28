@@ -60,25 +60,42 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-6) misses society / offline_scale fields. */
+/** Stale Flask on :5001 (pre-Phase-7) misses society intelligence fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
-  const phaseOk = phase === '6' || phase.startsWith('6') || phase.startsWith('5')
+  const phaseOk =
+    phase === '7' ||
+    phase.startsWith('7') ||
+    phase === '6' ||
+    phase.startsWith('6') ||
+    phase.startsWith('5')
   const hasRevision = Boolean(h.runtime?.code_revision)
   const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
   const hasOasisReply = Boolean(h.config?.oasis_reply)
   const hasSocial = Boolean(h.config?.social_dynamics)
   const hasOffline = Boolean(h.config?.offline_scale)
-  if (phaseOk && hasRevision && hasGenModes && hasOasisReply && hasSocial && hasOffline) {
+  const hasIntel =
+    Boolean(h.config?.society_intelligence) ||
+    Boolean(h.config?.social_dynamics?.society_analytics) ||
+    phase.startsWith('7')
+  if (
+    phaseOk &&
+    hasRevision &&
+    hasGenModes &&
+    hasOasisReply &&
+    hasSocial &&
+    hasOffline &&
+    (phase.startsWith('7') ? hasIntel : true)
+  ) {
     return null
   }
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 6 oder fehlende Offline-Scale-Felder). ' +
-      'Flask auf Port 5001 neu starten, sonst fehlen Society-/Netzwerk-Ansichten.',
+      'Backend wirkt veraltet (Phase ≠ 7 oder fehlende Society-Intelligence-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst fehlen Analytics-/Memory-Ansichten.',
   }
 })
 
@@ -117,6 +134,10 @@ const societyOverview = computed(() => {
     paid_llm_unlocked_for_scale: false,
     scheduler_plans: sim.value?.scheduler?.plans ?? 0,
     self_as_partner_count: sim.value?.scheduler?.self_as_partner_count ?? 0,
+    long_term_memory_agents: sim.value?.agent_memory?.agent_count_with_long_term ?? 0,
+    relationship_bonds: sim.value?.relationships?.bond_count ?? 0,
+    opinion_rounds_tracked: sim.value?.opinion_dynamics?.rounds_tracked ?? 0,
+    analytics_kpis: sim.value?.society_analytics?.kpis || {},
   }
 })
 
@@ -151,6 +172,36 @@ const progressPct = computed(() => {
   const s = sim.value
   if (!s?.max_steps) return 0
   return Math.min(100, Math.round((100 * (s.step || 0)) / s.max_steps))
+})
+
+const societyAnalytics = computed(() => sim.value?.society_analytics || null)
+
+const analyticsKpis = computed(() => {
+  const k = societyAnalytics.value?.kpis || societyOverview.value?.analytics_kpis
+  if (!k || typeof k !== 'object') return null
+  return k as Record<string, number>
+})
+
+const opinionChronology = computed(() => {
+  const frames = sim.value?.opinion_dynamics?.chronology
+  return Array.isArray(frames) ? frames.slice(-8) : []
+})
+
+const relationshipBonds = computed(() => {
+  const bonds = sim.value?.relationships?.bonds
+  return Array.isArray(bonds) ? bonds.slice(0, 24) : []
+})
+
+const longTermMemoryAgents = computed(() => {
+  const lt = sim.value?.agent_memory?.long_term
+  if (!lt || typeof lt !== 'object') return []
+  return Object.entries(lt)
+    .map(([id, entries]) => ({
+      id,
+      entries: Array.isArray(entries) ? entries.slice(-4) : [],
+    }))
+    .filter((m) => m.entries.length)
+    .slice(0, 12)
 })
 
 /** Explicit stop reason for limit_reached / failed — always visible when set. */
@@ -370,8 +421,9 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-6 skalierbare Multi-Agenten-Gesellschaft (Offline 10/25/50) —
-        OASIS, Scheduler, Positionen und belegte Relationen. Live-LLM bleibt ≤5.
+        Phase-7 Society Intelligence — lokales Langzeitgedächtnis, dynamische
+        Beziehungen, Meinungs-Chronologie und Analytics (Offline 10/25/50 × ≤4).
+        Live-LLM bleibt ≤5.
       </p>
     </header>
 
@@ -864,6 +916,81 @@ onUnmounted(() => {
         <p v-else class="empty">Beziehungen leer — nach dem Lauf sichtbar.</p>
       </div>
     </section>
+
+    <section class="analytics" v-if="societyAnalytics || analyticsKpis">
+      <h2>Society Analytics</h2>
+      <p class="lede-sm">
+        Phase-7 Kennzahlen — Memory, Beziehungen, Meinungsdynamik.
+        Offline-Scale {{ societyAnalytics?.scale?.agent_count ?? societyOverview?.agent_count ?? '—' }}
+        Agenten × ≤{{ societyAnalytics?.scale?.offline_max_rounds ?? 4 }} Runden ·
+        paid_llm_unlocked={{ societyAnalytics?.scale?.paid_llm_unlocked === false ? 'false' : '—' }}
+      </p>
+      <div class="society-grid" v-if="analyticsKpis">
+        <div>
+          <span class="k">Memory-Coverage</span>
+          <span class="v mono">{{ analyticsKpis.memory_coverage ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Relationship-Density</span>
+          <span class="v mono">{{ analyticsKpis.relationship_density ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Opinion-Volatility</span>
+          <span class="v mono">{{ analyticsKpis.opinion_volatility ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Social-Edges</span>
+          <span class="v mono">{{ analyticsKpis.social_edge_total ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">LT-Memory Agents</span>
+          <span class="v">{{ societyAnalytics?.memory?.agents_with_long_term ?? societyOverview?.long_term_memory_agents ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Bonds</span>
+          <span class="v">{{ societyAnalytics?.relationships?.bond_count ?? societyOverview?.relationship_bonds ?? 0 }}</span>
+        </div>
+      </div>
+
+      <h3>Meinungs-Chronologie</h3>
+      <ol class="log" v-if="opinionChronology.length">
+        <li v-for="f in opinionChronology" :key="'op' + f.step">
+          <span class="mono">R{{ f.step }}</span>
+          · Δ {{ f.changes_this_step ?? 0 }} /
+          Σ {{ f.cumulative_changes ?? 0 }}
+          · Polarität
+          <span class="mono">{{ JSON.stringify(f.polarity_distribution || {}) }}</span>
+        </li>
+      </ol>
+      <p v-else class="empty">Chronologie nach Offline-Lauf sichtbar.</p>
+
+      <h3>Dynamische Beziehungen (evidenced)</h3>
+      <ol class="log" v-if="relationshipBonds.length">
+        <li v-for="b in relationshipBonds" :key="b.source_agent_id + '-' + b.target_agent_id">
+          <span class="mono">u{{ b.source_agent_id }}→u{{ b.target_agent_id }}</span>
+          · strength {{ b.strength }} · evid {{ b.evidence_count }}
+          · {{ (b.relations || []).join(', ') }}
+        </li>
+      </ol>
+      <p v-else class="empty">Noch keine belegten Bonds.</p>
+
+      <h3>Long-Term Memory (sourced)</h3>
+      <div v-if="longTermMemoryAgents.length" class="mem-list">
+        <article v-for="m in longTermMemoryAgents" :key="'lt' + m.id" class="mem-card">
+          <h3>Agent {{ m.id }}</h3>
+          <ul class="feed compact">
+            <li v-for="(e, i) in m.entries" :key="i">
+              <span class="meta">
+                {{ e.kind }} · s{{ e.step ?? '-' }}
+                <span v-if="e.sources?.length"> · {{ e.sources.join(', ') }}</span>
+              </span>
+              <p>{{ e.text }}</p>
+            </li>
+          </ul>
+        </article>
+      </div>
+      <p v-else class="empty">Long-Term Memory nach dem Lauf sichtbar (kein Zep).</p>
+    </section>
   </div>
 </template>
 
@@ -1122,6 +1249,28 @@ input {
 .preset:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.analytics {
+  margin: 1.75rem 0 2rem;
+  padding: 1.1rem 1.15rem 1.25rem;
+  border: 1px solid var(--line);
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(196, 240, 97, 0.05)
+  );
+  animation: rise 0.85s ease both 0.12s;
+}
+
+.analytics h2 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+}
+
+.analytics h3 {
+  margin: 1.1rem 0 0.4rem;
+  font-size: 0.95rem;
 }
 
 .society {

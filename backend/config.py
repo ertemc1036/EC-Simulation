@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
 # Absolute live-test ceilings — env may be lower, never higher.
-# Phase 6: these stay fixed for paid Live-LLM; 10/25/50 is Offline/Scripted only.
+# Phase 6–7: these stay fixed for paid Live-LLM; 10/25/50 is Offline/Scripted only.
 LIVE_TEST_MAX_AGENTS = 5
 LIVE_TEST_MAX_ROUNDS = 2
 LIVE_TEST_MAX_LLM_CALLS = 10
@@ -20,11 +20,13 @@ LIVE_TEST_MAX_RETRIES = 0
 # Default 1: serialize model calls so token reservations cannot race.
 LIVE_TEST_MAX_PARALLEL_LLM_CALLS = 1
 
-# Offline / Scripted society scale (Phase 6) — never unlocks paid Live-LLM.
+# Offline / Scripted society scale (Phase 6+) — never unlocks paid Live-LLM.
 OFFLINE_MAX_AGENTS = 50
 OFFLINE_SCALE_PRESETS = (10, 25, 50)
 # Manual/scripted may use more rounds than live; live still clamps to 2.
 OFFLINE_MAX_ROUNDS = 4
+# Phase 7 long-term local memory cap (sourced entries; not Zep).
+DEFAULT_LONG_TERM_MEMORY_ENTRIES = 8
 
 COST_ESTIMATE_DISCLAIMER = (
     "Kostenschätzung auf Basis der konfigurierten USD/1M-Preise; "
@@ -79,6 +81,7 @@ class Settings:
     llm_max_retries: int
     agent_memory_window: int
     agent_local_memory_entries: int
+    agent_long_term_memory_entries: int
     max_agents: int
     offline_max_agents: int
     default_agent_count: int
@@ -153,6 +156,7 @@ class Settings:
             "default_agent_generation": self.default_agent_generation,
             "agent_generation_modes": ["dynamic", "fixed_test"],
             "agent_local_memory_entries": self.agent_local_memory_entries,
+            "agent_long_term_memory_entries": self.agent_long_term_memory_entries,
             "max_simulation_steps": self.max_simulation_steps,
             "max_llm_calls_per_run": self.max_llm_calls_per_run,
             "max_tokens_per_call": self.max_tokens_per_call,
@@ -203,7 +207,7 @@ class Settings:
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
-            "phase": "6",
+            "phase": "7",
             "oasis_reply": {
                 "parent_comment_id_supported": False,
                 "reply_via": "create_comment(post_id, content)",
@@ -225,6 +229,18 @@ class Settings:
                 ],
                 "scheduler": True,
                 "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
+                "long_term_memory": True,
+                "relationship_dynamics": True,
+                "opinion_chronology": True,
+                "society_analytics": True,
+            },
+            "society_intelligence": {
+                "long_term_memory_sourced": True,
+                "relationship_dynamics_evidenced_only": True,
+                "opinion_chronology": True,
+                "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
+                "analytics_dashboard": True,
+                "zep_integrated": False,
             },
         }
 
@@ -275,6 +291,13 @@ def load_settings() -> Settings:
         llm_max_retries=max_retries,
         agent_memory_window=_int("AGENT_MEMORY_WINDOW", 6),
         agent_local_memory_entries=max(1, _int("AGENT_LOCAL_MEMORY_ENTRIES", 12)),
+        agent_long_term_memory_entries=max(
+            1,
+            _int(
+                "AGENT_LONG_TERM_MEMORY_ENTRIES",
+                DEFAULT_LONG_TERM_MEMORY_ENTRIES,
+            ),
+        ),
         # max_agents = Live-LLM ceiling (unchanged). Offline scale is separate.
         max_agents=LIVE_TEST_MAX_AGENTS,
         offline_max_agents=OFFLINE_MAX_AGENTS,

@@ -45,12 +45,15 @@ from backend.simulation.knowledge_graph import LocalKnowledgeGraph
 from backend.simulation.local_memory import LocalAgentMemory
 from backend.simulation.manual_script import build_manual_rounds
 from backend.simulation.oasis_reply import oasis_reply_status
+from backend.simulation.opinion_dynamics import OpinionDynamics
 from backend.simulation.prompt_debug import (
     PROMPT_BUNDLE_ID,
     PromptDebugBuffer,
     action_dedup_key,
 )
+from backend.simulation.relationship_dynamics import RelationshipDynamics
 from backend.simulation.scripted_model import ScriptedReactiveModel
+from backend.simulation.society_analytics import build_society_analytics
 from backend.simulation.social_scheduler import SocialInteractionScheduler
 from backend.simulation.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
@@ -192,6 +195,9 @@ class SimulationState:
     cost_summary: dict[str, Any] = field(default_factory=dict)
     agent_memory: dict[str, Any] = field(default_factory=dict)
     agent_positions: dict[str, Any] = field(default_factory=dict)
+    relationships: dict[str, Any] = field(default_factory=dict)
+    opinion_dynamics: dict[str, Any] = field(default_factory=dict)
+    society_analytics: dict[str, Any] = field(default_factory=dict)
     knowledge_graph: dict[str, Any] = field(default_factory=dict)
     interaction_summary: dict[str, Any] = field(default_factory=dict)
     oasis_reply: dict[str, Any] = field(default_factory=dict)
@@ -229,6 +235,9 @@ class SimulationState:
             "cost_summary": self.cost_summary,
             "agent_memory": self.agent_memory,
             "agent_positions": self.agent_positions,
+            "relationships": self.relationships,
+            "opinion_dynamics": self.opinion_dynamics,
+            "society_analytics": self.society_analytics,
             "knowledge_graph": self.knowledge_graph,
             "interaction_summary": self.interaction_summary,
             "oasis_reply": self.oasis_reply,
@@ -269,10 +278,13 @@ class SimulationEngine:
             p.agent_id: p for p in self._run_agents
         }
         self._local_memory = LocalAgentMemory(
-            max_entries_per_agent=self.cfg.agent_local_memory_entries
+            max_entries_per_agent=self.cfg.agent_local_memory_entries,
+            max_long_term_per_agent=self.cfg.agent_long_term_memory_entries,
         )
         self._knowledge_graph = LocalKnowledgeGraph()
         self._positions = PositionTracker()
+        self._relationships = RelationshipDynamics()
+        self._opinion = OpinionDynamics()
         self._scheduler = SocialInteractionScheduler()
         self._run_language: str = "de"
         self._run_scenario: str = ""
@@ -574,11 +586,14 @@ class SimulationEngine:
             self._tracker = self._new_tracker(n_agents=len(run_agents), steps=steps)
             self._prompt_debug = PromptDebugBuffer()
             self._local_memory = LocalAgentMemory(
-                max_entries_per_agent=self.cfg.agent_local_memory_entries
+                max_entries_per_agent=self.cfg.agent_local_memory_entries,
+                max_long_term_per_agent=self.cfg.agent_long_term_memory_entries,
             )
             self._knowledge_graph = LocalKnowledgeGraph()
             self._positions = PositionTracker()
             self._positions.seed_from_goals(run_agents, step=0)
+            self._relationships = RelationshipDynamics()
+            self._opinion = OpinionDynamics()
             self._scheduler = SocialInteractionScheduler(scenario=scenario.strip())
             ScriptedReactiveModel.shared_scheduler = self._scheduler
             self._limit_stop = False
@@ -613,6 +628,9 @@ class SimulationEngine:
                 agents=agent_dicts,
                 agent_memory=self._local_memory.snapshot(),
                 agent_positions=self._positions.positions_payload(),
+                relationships=self._relationships.snapshot(),
+                opinion_dynamics=self._opinion.snapshot(),
+                society_analytics={},
                 knowledge_graph=self._knowledge_graph.to_dict(),
                 interaction_summary=_empty_interaction_summary(),
                 oasis_reply=reply_meta,
@@ -1401,6 +1419,12 @@ class SimulationEngine:
             step=sync_step,
         )
         positions_payload = self._positions.positions_payload()
+        # Phase 7: promote evidenced stances into sourced long-term memory.
+        self._local_memory.consolidate_from_positions(
+            positions=positions_payload.get("positions") or [],
+            step=sync_step,
+        )
+        edge_specs = self._positions.social_edge_specs()
         self._knowledge_graph.rebuild(
             scenario=self._run_scenario or self.state.scenario,
             agents=self._run_agents,
@@ -1408,11 +1432,28 @@ class SimulationEngine:
             comments=self.state.comments,
             reactions=self.state.reactions,
             action_log=self.state.action_log,
-            social_edge_specs=self._positions.social_edge_specs(),
+            social_edge_specs=edge_specs,
             agent_positions=positions_payload.get("positions") or [],
+        )
+        # Phase 7: dynamic relationships + opinion chronology (evidenced-only).
+        self._relationships.ingest_platform(
+            posts=self.state.posts,
+            comments=self.state.comments,
+            reactions=self.state.reactions,
+            social_edge_specs=edge_specs,
+            step=sync_step,
+        )
+        self._opinion.record_round(
+            step=sync_step,
+            polarity_distribution=positions_payload.get("polarity_distribution")
+            or {},
+            change_events=positions_payload.get("changes") or [],
+            agent_count=len(self._run_agents),
         )
         self.state.agent_memory = self._local_memory.snapshot()
         self.state.agent_positions = positions_payload
+        self.state.relationships = self._relationships.snapshot()
+        self.state.opinion_dynamics = self._opinion.snapshot()
         self.state.knowledge_graph = self._knowledge_graph.to_dict()
         self.state.interaction_summary = _build_interaction_summary(
             comments=self.state.comments,
@@ -1423,6 +1464,22 @@ class SimulationEngine:
         self.state.scheduler = self._scheduler.summary()
         pol = positions_payload.get("polarity_distribution") or {}
         social = (self.state.knowledge_graph or {}).get("social_relations") or {}
+        self.state.society_analytics = build_society_analytics(
+            agent_count=len(self._run_agents),
+            max_steps=self.state.max_steps,
+            step=sync_step,
+            execution_kind=self._execution_kind,
+            posts=self.state.posts,
+            comments=self.state.comments,
+            reactions=self.state.reactions,
+            agent_memory=self.state.agent_memory,
+            agent_positions=positions_payload,
+            relationships=self.state.relationships,
+            opinion=self.state.opinion_dynamics,
+            knowledge_graph=self.state.knowledge_graph,
+            interaction_summary=self.state.interaction_summary,
+            scheduler=self.state.scheduler,
+        )
         self.state.society_overview = {
             "agent_count": len(self._run_agents),
             "step": sync_step,
@@ -1442,6 +1499,14 @@ class SimulationEngine:
             "self_as_partner_count": (self.state.scheduler or {}).get(
                 "self_as_partner_count", 0
             ),
+            "long_term_memory_agents": self.state.agent_memory.get(
+                "agent_count_with_long_term", 0
+            ),
+            "relationship_bonds": self.state.relationships.get("bond_count", 0),
+            "opinion_rounds_tracked": self.state.opinion_dynamics.get(
+                "rounds_tracked", 0
+            ),
+            "analytics_kpis": (self.state.society_analytics or {}).get("kpis") or {},
         }
 
     def _persist_results(
@@ -1479,7 +1544,7 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 6,
+                "phase": 7,
                 "execution_kind": self._execution_kind,
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
@@ -1494,6 +1559,9 @@ class SimulationEngine:
                 },
                 "agent_memory_window": self.cfg.agent_memory_window,
                 "agent_local_memory_entries": self.cfg.agent_local_memory_entries,
+                "agent_long_term_memory_entries": (
+                    self.cfg.agent_long_term_memory_entries
+                ),
                 "zep_integrated": False,
                 "knowledge_graph_backend": "local",
                 "oasis_reply": oasis_reply_status(),
@@ -1527,6 +1595,15 @@ class SimulationEngine:
                         "position_changed",
                     ],
                 },
+                "society_intelligence": {
+                    "long_term_memory_sourced": True,
+                    "relationship_dynamics": True,
+                    "opinion_chronology": True,
+                    "society_analytics": True,
+                    "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
+                    "zep_integrated": False,
+                    "paid_llm_unlocked": False,
+                },
             },
             "agents": self.state.agents,
             "posts": self.state.posts,
@@ -1538,6 +1615,9 @@ class SimulationEngine:
             "cost_summary": self.state.cost_summary,
             "agent_memory": self.state.agent_memory,
             "agent_positions": self.state.agent_positions,
+            "relationships": self.state.relationships,
+            "opinion_dynamics": self.state.opinion_dynamics,
+            "society_analytics": self.state.society_analytics,
             "knowledge_graph": self.state.knowledge_graph,
             "interaction_summary": self.state.interaction_summary,
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),

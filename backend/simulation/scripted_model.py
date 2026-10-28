@@ -9,6 +9,9 @@ agrees_with / disagrees_with / responds_to are evidenced offline.
 
 Phase 6: SocialInteractionScheduler chooses partners/targets without self-as-partner;
 scales to offline 10/25/50 society runs.
+
+Phase 7: Multi-round opinion scenarios (bis 4 Runden) — establish → react →
+shift → consolidate, with polarity markers for evidenced Meinungsdynamik.
 """
 from __future__ import annotations
 
@@ -173,13 +176,16 @@ class ScriptedReactiveModel(BaseModelBackend):
         # Never treat self as inter-agent partner evidence in content.
         assert plan.partner_agent_id is None or plan.partner_agent_id != self.agent_id
 
+        stance_seed = _scripted_stance_line(self.agent_id, round_n)
+
         if not ids or plan.target_post_id is None:
             return (
                 "create_post",
                 {
                     "content": (
                         f"[{self.label}:{self.agent_id}] Beitrag #{n} — "
-                        f"mein Ziel leitet diese Reaktion auf das Szenario."
+                        f"{stance_seed} "
+                        f"(Runde {round_n}, Szenario-Reaktion)."
                     )
                 },
             )
@@ -193,7 +199,8 @@ class ScriptedReactiveModel(BaseModelBackend):
                     "post_id": target,
                     "content": (
                         f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
-                        f"auf Post {target} (Partner "
+                        f"auf Post {target}. {stance_seed} "
+                        f"(Partner "
                         f"{plan.partner_agent_id if plan.partner_agent_id is not None else 'n/a'}; "
                         f"kein parent_comment_id)."
                     ),
@@ -203,27 +210,24 @@ class ScriptedReactiveModel(BaseModelBackend):
         cid = int(plan.target_comment_id)
         hint = plan.action_hint
 
+        # Phase 7 opinion arc: R2 react, R3 shift, R4 consolidate.
         if round_n >= 2:
             if hint == "like_comment":
                 return ("like_comment", {"comment_id": cid})
             if hint == "dislike_comment":
                 return ("dislike_comment", {"comment_id": cid})
-            if hint == "create_comment_ref":
-                shift = (
-                    "Ich ändere meine Position nach dem Kommentar — Kompromiss."
-                    if (n + self.agent_id) % 2 == 0
-                    else "Ich halte dagegen und widerspreche klar."
+            if hint == "create_comment_ref" or round_n >= 3:
+                content = _scripted_ref_comment(
+                    label=self.label,
+                    agent_id=self.agent_id,
+                    comment_id=cid,
+                    round_n=round_n,
+                    partner=plan.partner_agent_id,
+                    call_index=n,
                 )
                 return (
                     "create_comment",
-                    {
-                        "post_id": target,
-                        "content": (
-                            f"[{self.label}:{self.agent_id}] →Kommentar#{cid} "
-                            f"{shift} (Runde {round_n}, Partner "
-                            f"{plan.partner_agent_id}, kein parent_comment_id)."
-                        ),
-                    },
+                    {"post_id": target, "content": content},
                 )
             return ("like_post", {"post_id": target})
 
@@ -234,7 +238,8 @@ class ScriptedReactiveModel(BaseModelBackend):
                     "post_id": target,
                     "content": (
                         f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
-                        f"auf Post {target} (kein parent_comment_id)."
+                        f"auf Post {target}. {stance_seed} "
+                        f"(kein parent_comment_id)."
                     ),
                 },
             )
@@ -304,3 +309,85 @@ class ScriptedReactiveModel(BaseModelBackend):
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]:
         return self._run(messages, response_format, tools)
+
+
+def _scripted_stance_line(agent_id: int, round_n: int) -> str:
+    """Deterministic polarity seed for offline opinion scenarios."""
+    bucket = agent_id % 3
+    if round_n <= 1:
+        if bucket == 0:
+            return "Ich bin für das Verbot — sinnvolles Verbot im Kerngebiet."
+        if bucket == 1:
+            return (
+                "Ich lehne das Verbot ab — pauschale Verbote gefährden Arbeitsplätze; "
+                "klare Ausnahmen und Lieferfenster nötig."
+            )
+        return (
+            "Zielkonflikt: Ausnahmeregelungen und Übergangsfristen statt "
+            "pauschalem Verbot."
+        )
+    if round_n == 2:
+        if bucket == 0:
+            return "stimme zu: ja zum Verbot, mit Messpunkten."
+        if bucket == 1:
+            return "widerspreche: gegen das Verbot ohne soziale Abfederung."
+        return "einerseits Schutz, andererseits Lieferfenster — Ausnahme für Anwohner."
+    # Round 3+: shift markers for half the society (evidenced change).
+    if agent_id % 2 == 0:
+        return (
+            "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
+            "Ausnahmeregelungen statt pauschalem Verbot."
+        )
+    return "Ich halte dagegen und widerspreche klar: nein zum pauschalen Verbot."
+
+
+def _scripted_ref_comment(
+    *,
+    label: str,
+    agent_id: int,
+    comment_id: int,
+    round_n: int,
+    partner: int | None,
+    call_index: int,
+) -> str:
+    """Local →Kommentar# content with agree/disagree/shift markers."""
+    if round_n >= 4:
+        # Consolidate: textual agree/disagree + confirmation or restatement.
+        if agent_id % 2 == 0:
+            body = (
+                "stimme zu und teile diese Einschätzung — "
+                "Ausnahmeregelungen bleiben zentral."
+            )
+        else:
+            body = (
+                "widerspreche weiterhin: sehe das anders — "
+                "gegen das Verbot ohne Lieferfenster."
+            )
+    elif round_n >= 3:
+        if (call_index + agent_id) % 2 == 0:
+            body = (
+                "Ich ändere meine Position nach dem Kommentar — "
+                "werde überzeugt von Ausnahmeregelungen."
+            )
+        else:
+            body = (
+                "Ich halte dagegen und widerspreche klar — "
+                "lehne das Verbot ab ohne soziale Abfederung."
+            )
+    else:
+        # Round 2: keep Phase-5 shift markers so 2-round offline runs
+        # still evidence position_changed / influenced_by.
+        if (call_index + agent_id) % 2 == 0:
+            body = (
+                "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
+                "stimme zu und werde überzeugt von Ausnahmeregelungen."
+            )
+        else:
+            body = (
+                "Ich halte dagegen und widerspreche klar — "
+                "lehne das Verbot ab ohne soziale Abfederung."
+            )
+    return (
+        f"[{label}:{agent_id}] →Kommentar#{comment_id} {body} "
+        f"(Runde {round_n}, Partner {partner}, kein parent_comment_id)."
+    )

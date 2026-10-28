@@ -168,6 +168,10 @@ export interface SocietyOverview {
   paid_llm_unlocked_for_scale?: boolean
   scheduler_plans?: number
   self_as_partner_count?: number
+  long_term_memory_agents?: number
+  relationship_bonds?: number
+  opinion_rounds_tracked?: number
+  analytics_kpis?: Record<string, number>
 }
 
 export interface SchedulerSnapshot {
@@ -188,15 +192,88 @@ export interface OasisReplyInfo {
   graph_relations_evidenced_only?: string[]
 }
 
+export interface MemoryEntry {
+  kind?: string
+  text?: string
+  step?: number | null
+  ts?: string
+  sources?: string[]
+  meta?: Record<string, unknown>
+}
+
 export interface AgentMemorySnapshot {
   backend?: string
   zep_integrated?: boolean
   max_entries_per_agent?: number
+  max_long_term_per_agent?: number
   agent_count_with_memory?: number
-  agents?: Record<
-    string,
-    Array<{ kind?: string; text?: string; step?: number | null; ts?: string }>
-  >
+  agent_count_with_long_term?: number
+  long_term_sourced_entries?: number
+  agents?: Record<string, MemoryEntry[]>
+  long_term?: Record<string, MemoryEntry[]>
+  note?: string
+}
+
+export interface RelationshipBond {
+  source_agent_id: number
+  target_agent_id: number
+  relations?: string[]
+  evidence_count?: number
+  strength?: number
+  first_step?: number | null
+  last_step?: number | null
+  evidences?: Array<Record<string, unknown>>
+}
+
+export interface RelationshipsSnapshot {
+  backend?: string
+  evidenced_only?: boolean
+  bond_count?: number
+  mean_strength?: number
+  by_relation?: Record<string, number>
+  bonds?: RelationshipBond[]
+  chronology?: Array<Record<string, unknown>>
+  note?: string
+}
+
+export interface OpinionDynamicsSnapshot {
+  backend?: string
+  rounds_tracked?: number
+  total_evidenced_changes?: number
+  shift_rate_per_agent_round?: number
+  transitions?: Record<string, number>
+  chronology?: Array<{
+    step?: number
+    agent_count?: number
+    polarity_distribution?: Record<string, number>
+    changes_this_step?: number
+    cumulative_changes?: number
+    change_samples?: Array<Record<string, unknown>>
+  }>
+  note?: string
+}
+
+export interface SocietyAnalytics {
+  phase?: number
+  execution_kind?: string
+  scale?: {
+    agent_count?: number
+    step?: number | null
+    max_steps?: number
+    offline_presets?: number[]
+    offline_max_rounds?: number
+    paid_llm_unlocked?: boolean
+  }
+  memory?: Record<string, unknown>
+  relationships?: Record<string, unknown>
+  opinion?: Record<string, unknown>
+  engagement?: Record<string, unknown>
+  kpis?: {
+    memory_coverage?: number
+    relationship_density?: number
+    opinion_volatility?: number
+    social_edge_total?: number
+  }
   note?: string
 }
 
@@ -224,6 +301,9 @@ export interface SimulationState {
   cost_summary: CostSummary
   agent_memory?: AgentMemorySnapshot
   agent_positions?: AgentPositionsSnapshot
+  relationships?: RelationshipsSnapshot
+  opinion_dynamics?: OpinionDynamicsSnapshot
+  society_analytics?: SocietyAnalytics
   knowledge_graph?: KnowledgeGraph
   interaction_summary?: InteractionSummary
   oasis_reply?: OasisReplyInfo
@@ -254,6 +334,7 @@ export interface HealthResponse {
     default_agent_generation?: string
     agent_generation_modes?: string[]
     agent_local_memory_entries?: number
+    agent_long_term_memory_entries?: number
     max_simulation_steps: number
     max_llm_calls_per_run?: number
     max_tokens_per_call?: number
@@ -294,6 +375,18 @@ export interface HealthResponse {
       relations_evidenced_only?: string[]
       scheduler?: boolean
       offline_scale_presets?: number[]
+      long_term_memory?: boolean
+      relationship_dynamics?: boolean
+      opinion_chronology?: boolean
+      society_analytics?: boolean
+    }
+    society_intelligence?: {
+      long_term_memory_sourced?: boolean
+      relationship_dynamics_evidenced_only?: boolean
+      opinion_chronology?: boolean
+      scripted_scenarios_max_rounds?: number
+      analytics_dashboard?: boolean
+      zep_integrated?: boolean
     }
     api_key_exposed?: boolean
   }

@@ -309,7 +309,7 @@ def test_two_round_scripted_growth_bounded(results_dir: Path):
 
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 6
+    assert data["meta"]["phase"] == 7
     assert data["meta"]["prompt_bundle_id"] == PROMPT_BUNDLE_ID
     assert data["meta"]["token_optimization"]["chat_history_reset_per_decision"] is True
     assert data["meta"]["token_optimization"]["atomic_reserve"] is True
