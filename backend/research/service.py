@@ -1,6 +1,8 @@
-"""Research study workflow stored as JSON. Offline fixtures only.
+"""Research study workflow stored as JSON.
 
-Sessions never construct an OpenAI client and never start the simulation engine.
+Offline demo fixtures never call a provider. The model pathway uses the
+OpenAI-compatible transport only after a run-specific approval on that request.
+This module does not start the simulation engine and does not read its approval.
 """
 from __future__ import annotations
 
@@ -12,15 +14,59 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import settings
+from backend.research.ai_protocol import (
+    AI_PARTICIPANTS,
+    PROTOCOL,
+    SYNTHESIS_FIXTURE,
+    SYNTHESIS_MODEL,
+    StudyLedger,
+    build_cost_estimate,
+    run_interview,
+    run_roster,
+    run_synthesis,
+)
 from backend.research.fixtures import EXAMPLE_ORDER, get_example
 from backend.research.integrity import (
     DISCLAIMER,
+    disclaimer_for_study,
     kind_index,
     prose_banned_hits,
     provenance_kinds_present,
     unresolved_source_ids,
     user_text_has_percent,
 )
+from backend.research.provider import credential_block_reason, get_research_provider
+
+_AI_MODES = {"ai", "llm", "model", "live", "live_llm", "openai"}
+_OFFLINE_MODES = {"offline_fixture", "offline", "fixture", "offline_demo"}
+_MODEL_VALIDATION = (
+    "A person must check whether real customers recognize this reading. "
+    "The cited statements are synthetic model output, not human-subject evidence."
+)
+
+
+def _stored_synthesis_method(study: dict) -> str:
+    explicit = study.get("synthesis_method")
+    if explicit:
+        return str(explicit)
+    session = (study.get("sessions") or [{}])[0]
+    if session.get("execution") == "model_interview":
+        return "not_synthesized"
+    if study.get("findings"):
+        return SYNTHESIS_FIXTURE
+    return "not_synthesized"
+
+
+def _stored_genuine(study: dict) -> bool:
+    session = (study.get("sessions") or [{}])[0]
+    usage = study.get("ai_usage") or {}
+    partial = bool(usage.get("partial") or session.get("partial"))
+    return bool(
+        session.get("execution") == "model_interview"
+        and session.get("statements")
+        and _stored_synthesis_method(study) == SYNTHESIS_MODEL
+        and not partial
+    )
 
 SCHEMA = "nanocrab.research.v1"
 EXPORT_SCHEMA = "nanocrab.research.export.v1"
@@ -176,8 +222,9 @@ class ResearchService:
         out = dict(study)
         out["project_name"] = project.get("name")
         out["organization"] = project.get("organization")
-        out["disclaimer"] = dict(DISCLAIMER)
+        out["disclaimer"] = disclaimer_for_study(study)
         out["provenance_kinds"] = provenance_kinds_present(study)
+        out["ai_cost_estimate"] = build_cost_estimate(study)
         return out
 
     def ceilings(self) -> dict[str, Any]:
@@ -206,6 +253,13 @@ class ResearchService:
             "simulation_engine_preserved": True,
             "research_sessions_call_openai": False,
             "research_sessions_call_simulation_engine": False,
+            "ai_research_pathway": True,
+            "ai_research_protocol": PROTOCOL,
+            "ai_research_participants": AI_PARTICIPANTS,
+            "ai_research_requires_run_specific_approval": True,
+            "ai_research_inherits_simulation_approval": False,
+            "page_load_makes_provider_calls": False,
+            "paid_llm_unlocked": False,
             "disclaimer": dict(DISCLAIMER),
             "ceilings": self.ceilings(),
             "provenance_kinds": [
@@ -228,6 +282,8 @@ class ResearchService:
                 "mvp": "1.0",
                 "disclaimer": dict(DISCLAIMER),
                 "ceilings": self.ceilings(),
+                "recorded_provider_usage": self._recorded_usage(),
+                "page_load_makes_provider_calls": False,
                 "counts": {
                     "projects": len(self.projects),
                     "studies": len(studies),
@@ -453,6 +509,8 @@ class ResearchService:
             study["participants"] = []
             study["sessions"] = []
             study["findings"] = []
+            study["participant_generation"] = None
+            study["synthesis_method"] = None
             study["status"] = "draft"
             study["updated_at"] = _now()
             question = study["research_question"]["text"]
@@ -467,8 +525,103 @@ class ResearchService:
                 "invalidated": ["participants", "sessions", "findings"],
             }
 
+    def _recorded_usage(self) -> dict[str, Any]:
+        calls = prompt = completion = 0
+        cost = 0.0
+        for study in self.studies.values():
+            usage = study.get("ai_usage") or {}
+            calls += int(usage.get("calls") or 0)
+            prompt += int(usage.get("prompt_tokens") or 0)
+            completion += int(usage.get("completion_tokens") or 0)
+            cost += float(usage.get("cost_usd") or 0)
+        return {
+            "calls": calls,
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+            "cost_usd": round(cost, 6),
+            "paid_llm_unlocked": False,
+            "provider_call_made_by_this_response": False,
+        }
+
+    def cost_estimate(self, study_id: str) -> dict[str, Any]:
+        with self._lock:
+            study = self._require_study(study_id)
+            return build_cost_estimate(study)
+
+    def _require_approval(self, body: dict) -> None:
+        approved = _truthy(body.get("llm_run_approved", body.get("confirm_llm_spend", False)))
+        if approved:
+            return
+        raise ResearchError(
+            "Approval required (Freigabe). Send llm_run_approved=true on this research request. "
+            "Simulation Lab approval is not used. No provider call was made.",
+            409,
+            status="blocked",
+            paid_llm_unlocked=False,
+            openai_calls=0,
+            provider_call_made=False,
+        )
+
+    def _block_if_no_credentials(self, study: dict) -> None:
+        reason = credential_block_reason()
+        if not reason:
+            return
+        usage = study.get("ai_usage") or {}
+        raise ResearchError(
+            reason,
+            400,
+            status="missing_credentials",
+            missing_credentials=True,
+            paid_llm_unlocked=False,
+            openai_calls=int(usage.get("calls") or 0),
+            cost_usd=float(usage.get("cost_usd") or 0),
+            provider_call_made=False,
+        )
+
+    def _apply_usage(self, study: dict, ledger: StudyLedger, *, partial: bool, stop_reason: str | None) -> dict:
+        snap = ledger.snapshot(partial=partial, stop_reason=stop_reason)
+        study["ai_usage"] = snap
+        study["updated_at"] = _now()
+        return snap
+
+    def _usage_payload(self, snap: dict) -> dict[str, Any]:
+        return {
+            "openai_calls": snap["calls"],
+            "prompt_tokens": snap["prompt_tokens"],
+            "completion_tokens": snap["completion_tokens"],
+            "total_tokens": snap["total_tokens"],
+            "cost_usd": snap["cost_usd"],
+            "paid_llm_unlocked": False,
+            "partial": snap["partial"],
+            "stop_reason": snap["stop_reason"],
+        }
+
+    def _reject_demo_ai(self) -> None:
+        raise ResearchError(
+            "Offline demo fixtures are not live AI research. "
+            "Create a study and choose AI Research. No provider call was made.",
+            400,
+            status="offline_demo",
+            paid_llm_unlocked=False,
+            openai_calls=0,
+            provider_call_made=False,
+        )
+
     def generate_participants(self, study_id: str, body: dict | None) -> dict[str, Any]:
         body = body or {}
+        mode = (body.get("mode") or body.get("generation") or "offline_fixture").strip().lower()
+        if mode in _AI_MODES:
+            self._require_approval(body)
+            return self._generate_model_participants(study_id, body)
+        if mode not in _OFFLINE_MODES:
+            raise ResearchError(
+                "Unknown participant mode. Use offline_fixture or ai.",
+                400,
+                paid_llm_unlocked=False,
+                openai_calls=0,
+                provider_call_made=False,
+            )
         with self._lock:
             study = self._require_study(study_id)
             if study.get("read_only_fixture"):
@@ -511,12 +664,15 @@ class ResearchService:
                         "hope": row["hope"],
                         "synthetic": True,
                         "human_subject": False,
+                        "generation": "offline_deterministic_fixture",
                     }
                 )
             study["participants"] = people
+            study["participant_generation"] = "offline_deterministic_fixture"
             study["requested_participant_count"] = count
             study["sessions"] = []
             study["findings"] = []
+            study["synthesis_method"] = None
             study["status"] = "participants_ready"
             study["updated_at"] = _now()
             self._persist()
@@ -524,38 +680,120 @@ class ResearchService:
                 "ok": True,
                 "participants": people,
                 "study": self._public_study(study),
-                "note": "Deterministic offline roster. Not genuine AI research and not human subjects.",
+                "note": "Offline demo roster. Not a model transcript and not human subjects.",
+                "provider_call_made": False,
+                "openai_calls": 0,
+                "paid_llm_unlocked": False,
+            }
+
+    def _generate_model_participants(self, study_id: str, body: dict) -> dict[str, Any]:
+        with self._lock:
+            study = self._require_study(study_id)
+            if study.get("read_only_fixture"):
+                self._reject_demo_ai()
+            if body.get("count") is not None or body.get("participant_count") is not None:
+                try:
+                    asked = int(body.get("count", body.get("participant_count")))
+                except (TypeError, ValueError):
+                    raise ResearchError("AI research interviews use 3 synthetic participants.")
+                if asked != AI_PARTICIPANTS:
+                    raise ResearchError(
+                        "AI research interviews use 3 synthetic participants.",
+                        400,
+                        paid_llm_unlocked=False,
+                        openai_calls=0,
+                        provider_call_made=False,
+                    )
+            self._block_if_no_credentials(study)
+            ledger = StudyLedger.from_study(study)
+            calls_before = ledger.calls
+            people_rows, stop = run_roster(study, get_research_provider(), ledger)
+            if people_rows is None and stop == "budget":
+                snap = self._apply_usage(study, ledger, partial=True, stop_reason="budget")
+                self._persist()
+                return {
+                    "ok": True,
+                    "partial": True,
+                    "participants": study.get("participants") or [],
+                    "study": self._public_study(study),
+                    "note": "The study budget cannot cover another provider call. No personas were invented.",
+                    "provider_call_made": False,
+                    **self._usage_payload(snap),
+                }
+            if people_rows is None and stop == "missing_credentials":
+                raise ResearchError(
+                    "OPENAI_API_KEY is missing. No provider call was made.",
+                    400,
+                    status="missing_credentials",
+                    missing_credentials=True,
+                    paid_llm_unlocked=False,
+                    openai_calls=ledger.calls,
+                    provider_call_made=False,
+                )
+            if people_rows is None:
+                snap = self._apply_usage(
+                    study,
+                    ledger,
+                    partial=True,
+                    stop_reason=stop or "invalid_model_response",
+                )
+                self._persist()
+                status = 422 if stop == "invalid_model_response" else 502
+                raise ResearchError(
+                    "The model response could not be stored. No personas were invented.",
+                    status,
+                    status=stop or "invalid_model_response",
+                    **self._usage_payload(snap),
+                    provider_call_made=ledger.calls > calls_before,
+                )
+            people = []
+            for row in people_rows:
+                people.append(
+                    {
+                        "id": _new_id("par"),
+                        "kind": "synthetic_participant",
+                        "name": row["name"],
+                        "role": row["role"],
+                        "perspective": row["perspective"],
+                        "tension": row["tension"],
+                        "hope": row["hope"],
+                        "synthetic": True,
+                        "human_subject": False,
+                        "generation": "model",
+                    }
+                )
+            study["participants"] = people
+            study["participant_generation"] = "model"
+            study["requested_participant_count"] = AI_PARTICIPANTS
+            study["sessions"] = []
+            study["findings"] = []
+            study["synthesis_method"] = None
+            study["status"] = "participants_ready"
+            snap = self._apply_usage(study, ledger, partial=bool(stop), stop_reason=stop)
+            self._persist()
+            return {
+                "ok": True,
+                "participants": people,
+                "study": self._public_study(study),
+                "note": "Model pathway roster. Synthetic personas, not human subjects, not an offline demo fixture.",
+                "provider_call_made": ledger.calls > calls_before,
+                **self._usage_payload(snap),
             }
 
     def run_session(self, study_id: str, body: dict | None) -> dict[str, Any]:
         body = body or {}
         mode = (body.get("mode") or body.get("execution") or "offline_fixture").strip().lower()
-        approved = _truthy(body.get("llm_run_approved", body.get("confirm_llm_spend", False)))
-        if mode in {"llm", "live", "live_llm", "openai"}:
-            if not approved:
-                raise ResearchError(
-                    "Approval required (Freigabe). Send llm_run_approved=true. "
-                    "Research sessions do not call a provider.",
-                    409,
-                    status="blocked",
-                    paid_llm_unlocked=False,
-                    openai_calls=0,
-                )
+        if mode in _AI_MODES:
+            self._require_approval(body)
+            return self._run_model_session(study_id)
+        if mode not in _OFFLINE_MODES:
             raise ResearchError(
-                "Research MVP does not run a paid LLM session. "
-                "paid_llm_unlocked=false. No provider call was made.",
-                409,
-                status="blocked",
-                paid_llm_unlocked=False,
-                openai_calls=0,
-            )
-        if mode not in {"offline_fixture", "offline", "fixture"}:
-            raise ResearchError(
-                "Research sessions are offline fixtures. "
-                "Use Simulation Lab for the OASIS engine. This endpoint does not start a simulation.",
+                "Unknown research session mode. Use offline_fixture or llm. "
+                "This endpoint does not start the OASIS engine.",
                 400,
                 paid_llm_unlocked=False,
                 openai_calls=0,
+                provider_call_made=False,
             )
         with self._lock:
             study = self._require_study(study_id)
@@ -584,11 +822,13 @@ class ResearchService:
                         "participant_id": person["id"],
                         "text": (
                             f"{person['name']} is a synthetic {person['role']} persona "
-                            f"and not a human subject. In this offline fixture, the tension "
-                            f"they voice is {tension}. This is not an interview quote and "
+                            f"and not a human subject. In this offline demo fixture, the tension "
+                            f"they voice is {tension}. This is not a model transcript and "
                             f"not a measured frequency."
                         ),
                         "source_refs": [],
+                        "origin": "offline_fixture",
+                        "prompt_task": "offline_template",
                     }
                 )
                 refs = []
@@ -605,23 +845,31 @@ class ResearchService:
                             f"{hope}. They point at the user-supplied brief rather than inventing a figure."
                         ),
                         "source_refs": refs,
+                        "origin": "offline_fixture",
+                        "prompt_task": "offline_template",
                     }
                 )
             session = {
                 "id": _new_id("ses"),
                 "kind": "research_session",
                 "execution": "offline_deterministic_fixture",
+                "protocol": "offline_demo",
                 "genuine_ai": False,
                 "provider": None,
                 "provider_calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
                 "cost_usd": 0,
                 "rounds": 1,
                 "live_llm": False,
-                "label": "Offline deterministic fixture — not genuine AI research",
+                "partial": False,
+                "label": "Offline demo fixture — not live AI",
                 "statements": statements,
             }
             study["sessions"] = [session]
             study["findings"] = []
+            study["synthesis_method"] = None
             study["status"] = "session_ready"
             study["updated_at"] = _now()
             self._persist()
@@ -632,9 +880,85 @@ class ResearchService:
                 "openai_calls": 0,
                 "cost_usd": 0,
                 "paid_llm_unlocked": False,
+                "provider_call_made": False,
             }
 
-    def derive_findings(self, study_id: str) -> dict[str, Any]:
+    def _run_model_session(self, study_id: str) -> dict[str, Any]:
+        with self._lock:
+            study = self._require_study(study_id)
+            if study.get("read_only_fixture"):
+                self._reject_demo_ai()
+            if study.get("participant_generation") != "model":
+                usage = study.get("ai_usage") or {}
+                raise ResearchError(
+                    "Generate model participants before an AI research interview. "
+                    "Offline demo personas stay on the offline path. No provider call was made.",
+                    400,
+                    status="offline_demo",
+                    paid_llm_unlocked=False,
+                    openai_calls=int(usage.get("calls") or 0),
+                    provider_call_made=False,
+                )
+            people = study.get("participants") or []
+            if len(people) != AI_PARTICIPANTS:
+                raise ResearchError(
+                    "AI research interviews use 3 synthetic participants.",
+                    400,
+                    paid_llm_unlocked=False,
+                    openai_calls=0,
+                    provider_call_made=False,
+                )
+            self._block_if_no_credentials(study)
+            ledger = StudyLedger.from_study(study)
+            mark = ledger.mark()
+            provider = get_research_provider()
+            result = run_interview(study, provider, ledger, _new_id)
+            statements = result["statements"]
+            partial = bool(result["partial"])
+            stop = result["stop_reason"]
+            spent = ledger.delta(mark)
+            rounds = max((row.get("turn") or 1) for row in statements) if statements else 0
+            session = {
+                "id": _new_id("ses"),
+                "kind": "research_session",
+                "execution": "model_interview",
+                "protocol": PROTOCOL,
+                "genuine_ai": bool(statements),
+                "provider": getattr(provider, "name", "model"),
+                "provider_calls": spent["calls"],
+                "prompt_tokens": spent["prompt_tokens"],
+                "completion_tokens": spent["completion_tokens"],
+                "total_tokens": spent["total_tokens"],
+                "cost_usd": spent["cost_usd"],
+                "rounds": rounds,
+                "live_llm": False,
+                "partial": partial,
+                "stop_reason": stop,
+                "label": "Model pathway transcript — synthetic personas, not an offline demo",
+                "statements": statements,
+            }
+            study["sessions"] = [session]
+            study["findings"] = []
+            study["synthesis_method"] = None
+            study["status"] = "session_partial" if partial or not statements else "session_ready"
+            snap = self._apply_usage(study, ledger, partial=partial, stop_reason=stop)
+            self._persist()
+            note = (
+                "Partial model transcript. Missing turns were not invented."
+                if partial
+                else "Model pathway transcript. Not an offline demo fixture."
+            )
+            return {
+                "ok": True,
+                "session": session,
+                "study": self._public_study(study),
+                "note": note,
+                "provider_call_made": int(spent["calls"]) > 0,
+                **self._usage_payload(snap),
+            }
+
+    def derive_findings(self, study_id: str, body: dict | None = None) -> dict[str, Any]:
+        body = body or {}
         with self._lock:
             study = self._require_study(study_id)
             if study.get("read_only_fixture") and study.get("findings"):
@@ -643,10 +967,26 @@ class ResearchService:
                     "findings": study["findings"],
                     "study": self._public_study(study),
                     "note": "Fixture interpretations kept. Not model output.",
+                    "provider_call_made": False,
+                    "openai_calls": 0,
+                    "paid_llm_unlocked": False,
                 }
             sessions = study.get("sessions") or []
-            if not sessions or not sessions[0].get("statements"):
-                raise ResearchError("Run an offline session before findings.")
+            session = sessions[0] if sessions else None
+            if session and session.get("execution") == "model_interview":
+                if not session.get("statements"):
+                    usage = study.get("ai_usage") or {}
+                    raise ResearchError(
+                        "The model session has no statements. Nothing was invented.",
+                        400,
+                        paid_llm_unlocked=False,
+                        openai_calls=int(usage.get("calls") or 0),
+                        provider_call_made=False,
+                    )
+                self._require_approval(body)
+                return self._synthesize_model_findings(study)
+            if not session or not session.get("statements"):
+                raise ResearchError("Run a session before findings.")
             people = {p["id"]: p for p in study.get("participants") or []}
             sources = (study.get("context") or {}).get("sources") or []
             findings = []
@@ -675,6 +1015,7 @@ class ResearchService:
                             f"a market share, or evidence from human subjects."
                         ),
                         "source_ids": source_ids,
+                        "synthesis_method": SYNTHESIS_FIXTURE,
                         "human_validation": {
                             "id": _new_id("hv"),
                             "kind": "human_validation_need",
@@ -687,6 +1028,7 @@ class ResearchService:
                     }
                 )
             study["findings"] = findings
+            study["synthesis_method"] = SYNTHESIS_FIXTURE
             study["status"] = "findings_ready"
             study["updated_at"] = _now()
             banned = prose_banned_hits({"findings": findings, "sessions": study["sessions"]})
@@ -697,7 +1039,123 @@ class ResearchService:
                     banned=banned,
                 )
             self._persist()
-            return {"ok": True, "findings": findings, "study": self._public_study(study)}
+            return {
+                "ok": True,
+                "findings": findings,
+                "study": self._public_study(study),
+                "synthesis_method": SYNTHESIS_FIXTURE,
+                "provider_call_made": False,
+                "openai_calls": int((study.get("ai_usage") or {}).get("calls") or 0),
+                "paid_llm_unlocked": False,
+            }
+
+    def _synthesize_model_findings(self, study: dict) -> dict[str, Any]:
+        """Caller holds the study lock. Does not start the simulation engine."""
+        self._block_if_no_credentials(study)
+        session = study["sessions"][0]
+        statements = session.get("statements") or []
+        ledger = StudyLedger.from_study(study)
+        calls_before = ledger.calls
+        parsed, stop = run_synthesis(study, statements, get_research_provider(), ledger)
+        if parsed is None and stop == "budget":
+            snap = self._apply_usage(study, ledger, partial=True, stop_reason="budget")
+            self._persist()
+            return {
+                "ok": True,
+                "partial": True,
+                "findings": study.get("findings") or [],
+                "study": self._public_study(study),
+                "note": "The study budget cannot cover synthesis. No findings were invented.",
+                "synthesis_method": study.get("synthesis_method") or "not_synthesized",
+                "provider_call_made": False,
+                **self._usage_payload(snap),
+            }
+        if parsed is None:
+            snap = self._apply_usage(
+                study,
+                ledger,
+                partial=True,
+                stop_reason=stop or "invalid_model_response",
+            )
+            self._persist()
+            code = 422 if stop == "invalid_model_response" else 502
+            raise ResearchError(
+                "The model synthesis could not be stored. No findings were invented.",
+                code,
+                status=stop or "invalid_model_response",
+                provider_call_made=ledger.calls > calls_before,
+                **self._usage_payload(snap),
+            )
+        findings = []
+        question_id = (study.get("research_question") or {}).get("id")
+        for row in parsed.findings:
+            source_ids: list[str] = []
+            for statement_id in row["statement_ids"]:
+                if statement_id not in source_ids:
+                    source_ids.append(statement_id)
+            if question_id and question_id not in source_ids:
+                source_ids.append(question_id)
+            cited = set(row["statement_ids"])
+            for statement in statements:
+                if statement.get("id") not in cited:
+                    continue
+                for ref in statement.get("source_refs") or []:
+                    if ref not in source_ids:
+                        source_ids.append(ref)
+            findings.append(
+                {
+                    "id": _new_id("find"),
+                    "kind": "interpretation",
+                    "title": row["title"],
+                    "text": row["text"],
+                    "source_ids": source_ids,
+                    "synthesis_method": SYNTHESIS_MODEL,
+                    "human_validation": {
+                        "id": _new_id("hv"),
+                        "kind": "human_validation_need",
+                        "text": row["human_validation"] or _MODEL_VALIDATION,
+                    },
+                }
+            )
+        banned = prose_banned_hits({"findings": findings})
+        if banned:
+            snap = self._apply_usage(
+                study,
+                ledger,
+                partial=True,
+                stop_reason="invalid_model_response",
+            )
+            self._persist()
+            raise ResearchError(
+                "Synthesis contained a disallowed claim and was not stored.",
+                422,
+                status="invalid_model_response",
+                banned=banned,
+                provider_call_made=True,
+                **self._usage_payload(snap),
+            )
+        partial = bool(stop) or bool(session.get("partial")) or bool(parsed.dropped)
+        reason = stop or (session.get("stop_reason") if partial else None)
+        study["findings"] = findings
+        study["synthesis_method"] = SYNTHESIS_MODEL
+        study["status"] = "findings_partial" if partial else "findings_ready"
+        snap = self._apply_usage(study, ledger, partial=partial, stop_reason=reason)
+        self._persist()
+        note = (
+            "Partial synthesis. Missing pieces were not invented."
+            if partial
+            else "Model structured synthesis. Not an offline demo reading."
+        )
+        return {
+            "ok": True,
+            "partial": partial,
+            "findings": findings,
+            "study": self._public_study(study),
+            "note": note,
+            "synthesis_method": SYNTHESIS_MODEL,
+            "provider_call_made": ledger.calls > calls_before,
+            **self._usage_payload(snap),
+        }
 
     def export_study(self, study_id: str) -> dict[str, Any]:
         with self._lock:
@@ -720,6 +1178,10 @@ class ResearchService:
                 }
             )
             count = len(study.get("participants") or [])
+            usage = study.get("ai_usage") or {}
+            session = (study.get("sessions") or [{}])[0]
+            partial = bool(usage.get("partial") or session.get("partial"))
+            method = _stored_synthesis_method(study)
             complete = (
                 not missing
                 and not banned
@@ -728,6 +1190,7 @@ class ResearchService:
                 and bool(study.get("findings"))
                 and bool((study.get("research_question") or {}).get("text"))
                 and bool((study.get("context") or {}).get("text"))
+                and not partial
             )
             return {
                 "schema": EXPORT_SCHEMA,
@@ -735,7 +1198,7 @@ class ResearchService:
                 "product": "NanoCrab Lab",
                 "mvp": "1.0",
                 "api_version": "v1",
-                "disclaimer": dict(DISCLAIMER),
+                "disclaimer": disclaimer_for_study(study),
                 "project": {
                     "id": project.get("id"),
                     "name": project.get("name"),
@@ -752,6 +1215,8 @@ class ResearchService:
                     "status": study.get("status"),
                     "example_slug": study.get("example_slug"),
                     "audience": study.get("audience"),
+                    "participant_generation": study.get("participant_generation"),
+                    "synthesis_method": method,
                     "participants": study.get("participants"),
                     "sessions": study.get("sessions"),
                     "findings": study.get("findings"),
@@ -767,9 +1232,14 @@ class ResearchService:
                     "synthetic_not_human_research": True,
                     "not_research_validated": True,
                     "no_representativeness_claim": True,
-                    "genuine_ai_research": False,
-                    "openai_calls": 0,
-                    "cost_usd": 0,
+                    "genuine_ai_research": _stored_genuine(study),
+                    "synthesis_method": method,
+                    "partial": partial,
+                    "openai_calls": int(usage.get("calls") or 0),
+                    "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                    "completion_tokens": int(usage.get("completion_tokens") or 0),
+                    "total_tokens": int(usage.get("total_tokens") or 0),
+                    "cost_usd": float(usage.get("cost_usd") or 0),
                     "paid_llm_unlocked": False,
                     "user_input_contains_percent_pattern": bool(
                         study.get("user_input_contains_percent_pattern")
@@ -821,7 +1291,8 @@ class ResearchService:
                         "finding_count": len(study.get("findings") or []),
                         "participant_count": len(study.get("participants") or []),
                         "export_path": f"/api/v1/research/studies/{study.get('id')}/export",
-                        "genuine_ai_research": False,
+                        "genuine_ai_research": _stored_genuine(study),
+                        "synthesis_method": _stored_synthesis_method(study),
                         "not_research_validated": True,
                     }
                 )

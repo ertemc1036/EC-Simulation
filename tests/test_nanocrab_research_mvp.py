@@ -213,6 +213,12 @@ def test_llm_session_is_409_and_makes_no_provider_call(research_client, monkeypa
     except ImportError:
         pass
 
+    def explode_urlopen(*_args, **_kwargs):
+        called["n"] += 1
+        raise AssertionError("research HTTP is forbidden")
+
+    monkeypatch.setattr("urllib.request.urlopen", explode_urlopen)
+
     study_id = client.post("/api/v1/research/examples/saas-pricing/load").get_json()["study"]["id"]
     blocked = client.post(
         f"/api/v1/research/studies/{study_id}/sessions",
@@ -230,11 +236,12 @@ def test_llm_session_is_409_and_makes_no_provider_call(research_client, monkeypa
         f"/api/v1/research/studies/{study_id}/sessions",
         json={"mode": "llm", "llm_run_approved": True},
     )
-    assert refused.status_code == 409
+    assert refused.status_code == 400
     refused_body = refused.get_json()
     assert refused_body["paid_llm_unlocked"] is False
     assert refused_body["openai_calls"] == 0
-    assert "paid_llm_unlocked=false" in refused_body["error"]
+    assert refused_body["provider_call_made"] is False
+    assert refused_body["status"] == "offline_demo"
     assert called["n"] == 0
 
 

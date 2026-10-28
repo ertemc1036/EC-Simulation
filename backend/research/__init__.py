@@ -1,6 +1,7 @@
-"""NanoCrab Lab research workflow (offline fixtures).
+"""NanoCrab Lab research workflow.
 
-Does not call a model provider and does not modify the simulation engine.
+Offline demo fixtures do not call a provider. The model pathway is separate
+and does not modify the simulation engine.
 MiroFish source is not included. See docs/nanocrab-research-api-v1.md.
 """
 

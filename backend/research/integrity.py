@@ -146,6 +146,46 @@ def unresolved_source_ids(study: dict) -> list[str]:
     return missing
 
 
+def disclaimer_for_study(study: dict) -> dict[str, Any]:
+    """Offline demos keep the fixture disclaimer. Model pathway studies say so."""
+    session = ((study.get("sessions") or [None])[0]) or {}
+    usage = study.get("ai_usage") or {}
+    modelish = (
+        session.get("execution") == "model_interview"
+        or study.get("participant_generation") == "model"
+    )
+    if not modelish:
+        return dict(DISCLAIMER)
+    genuine = (
+        session.get("execution") == "model_interview"
+        and bool(session.get("statements"))
+        and study.get("synthesis_method") == "model_structured_json"
+        and not usage.get("partial")
+        and not session.get("partial")
+    )
+    if session.get("execution") == "model_interview":
+        generation = "model_pathway"
+    else:
+        generation = "model_participants"
+    return {
+        "synthetic_not_human_research": True,
+        "not_research_validated": True,
+        "no_representativeness_claim": True,
+        "no_fabricated_statistics": True,
+        "generation": generation,
+        "genuine_ai_research": genuine,
+        "summary": (
+            "Synthetic personas are not human subjects and not a market sample. "
+            "Model-pathway text is labeled separately from offline demo fixtures. "
+            "Interpretations need a human check. This record claims no statistics."
+        ),
+        "openai_calls": int(usage.get("calls") or 0),
+        "cost_usd": float(usage.get("cost_usd") or 0),
+        "paid_llm_unlocked": False,
+        "synthesis_method": study.get("synthesis_method") or "not_synthesized",
+    }
+
+
 def provenance_kinds_present(study: dict) -> list[str]:
     present: set[str] = set()
     question = study.get("research_question") or {}
