@@ -1,8 +1,8 @@
-# EC-Simulation (Phase 6)
+# EC-Simulation (Phase 7)
 
 Multi-Agent Social Simulation auf **camel-oasis 0.2.5** mit Flask-Backend und Vue/TypeScript-Dashboard.
 
-Phase 1–5.2: Manual/LLMAction, Freigabe, Token-Gates, Social Dynamics. **Phase 6:** skalierbare Offline-Gesellschaft **10/25/50** (Manual/Scripted). Live-LLM-Ceilings bleiben **5/2/10/20k/500/$0.20** — Scale schaltet kein bezahltes LLM frei. Architektur: `docs/architecture-phase6.md`.
+Phase 1–5.2: Manual/LLMAction, Freigabe, Token-Gates, Social Dynamics. Phase 6: skalierbare Offline-Gesellschaft **10/25/50**. **Phase 7:** Society Intelligence — langfristiges lokales Agentengedächtnis (sourced, bounded, kein Zep), dynamische evidenced-only Beziehungen, Meinungsdynamik mit Chronologie, Society-Analytics-Dashboard, Scripted-Szenarien bis **4** Offline-Runden. Live-LLM-Ceilings bleiben **5/2/10/20k/500/$0.20** (`paid_llm_unlocked=false`). Architektur: `docs/architecture-phase7.md`.
 
 ## Voraussetzungen
 
