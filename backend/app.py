@@ -25,6 +25,7 @@ from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.cost_token_planner import planner_status_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
 from backend.simulation.interaction_engine import interaction_status_payload  # noqa: E402
+from backend.research.routes import research_bp  # noqa: E402
 
 # Fingerprint of key Phase-8 modules — dashboard can detect a stale :5001 process.
 _PHASE8_MARKERS = (
@@ -66,6 +67,7 @@ EXPECTED_PHASE = "8"
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": settings.cors_origins}})
 socketio = SocketIO(app, cors_allowed_origins=settings.cors_origins, async_mode="threading")
+app.register_blueprint(research_bp)
 
 engine = SimulationEngine(settings)
 
@@ -132,6 +134,17 @@ def health():
                 "scheduler_version": 3,
             },
             "zep": engine.zep.status,
+            "research_lab": {
+                "product": "NanoCrab Lab",
+                "mvp": "1.0",
+                "api": "/api/v1/research",
+                "offline_fixtures_only": True,
+                "genuine_ai_research": False,
+                "openai_calls": 0,
+                "cost_usd": 0,
+                "paid_llm_unlocked": False,
+                "simulation_engine_preserved": True,
+            },
         }
     )
 

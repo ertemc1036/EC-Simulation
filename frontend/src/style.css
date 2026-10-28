@@ -1,16 +1,17 @@
 :root {
-  --bg0: #0f1c18;
-  --bg1: #163028;
-  --bg2: #1e3d32;
-  --ink: #e8f2ec;
-  --muted: #9bb5a8;
-  --accent: #c4f061;
-  --accent-ink: #132018;
-  --warn: #ffb454;
+  --bg0: #07111f;
+  --bg1: #0c1a2e;
+  --bg2: #14324c;
+  --ink: #e7f3f8;
+  --muted: #93b0c4;
+  --accent: #3ee0d2;
+  --accent-ink: #04222a;
+  --warn: #f0b45a;
   --danger: #ff7a6e;
-  --line: rgba(232, 242, 236, 0.12);
-  --panel: rgba(15, 28, 24, 0.72);
-  --font-display: 'Instrument Serif', Georgia, serif;
+  --ok: #7dcea0;
+  --line: rgba(170, 220, 230, 0.16);
+  --panel: rgba(8, 18, 32, 0.78);
+  --font-display: Outfit, 'DM Sans', sans-serif;
   --font-body: 'DM Sans', 'Segoe UI', sans-serif;
   color: var(--ink);
   background: var(--bg0);
@@ -34,9 +35,9 @@ body,
 body {
   min-height: 100vh;
   background:
-    radial-gradient(ellipse 90% 60% at 10% -10%, rgba(196, 240, 97, 0.18), transparent 55%),
-    radial-gradient(ellipse 70% 50% at 100% 0%, rgba(70, 140, 120, 0.28), transparent 50%),
-    linear-gradient(160deg, var(--bg0), var(--bg1) 45%, #0c1613 100%);
+    radial-gradient(ellipse 80% 50% at 0% -10%, rgba(62, 224, 210, 0.16), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(36, 90, 140, 0.35), transparent 50%),
+    linear-gradient(165deg, #07111f, #0c1a2e 42%, #081018 100%);
   background-attachment: fixed;
 }
 

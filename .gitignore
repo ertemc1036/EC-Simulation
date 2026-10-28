@@ -11,6 +11,7 @@ frontend/node_modules/
 data/results/*.json
 data/results/*.db
 !data/results/.gitkeep
+data/research/*.json
 log/
 *.db
 .DS_Store
