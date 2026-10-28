@@ -54,8 +54,10 @@ def build_society_analytics(
 
     return {
         "phase": 7,
+        "quality_fix": "7.1",
         "backend": "local",
         "execution_kind": execution_kind,
+        "content_synthetic": execution_kind in {"manual", "scripted"},
         "scale": {
             "agent_count": agent_count,
             "step": step,

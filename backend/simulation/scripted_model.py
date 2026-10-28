@@ -38,6 +38,11 @@ from openai.types.chat.chat_completion_message_tool_call import (
 from pydantic import BaseModel
 
 from backend.simulation.social_scheduler import SocialInteractionScheduler
+from backend.simulation.topic_context import (
+    detect_topic_domain,
+    measure_label,
+    synthetic_tag,
+)
 
 
 _POST_ID_RE = re.compile(r'"post_id"\s*:\s*(\d+)')
@@ -123,6 +128,8 @@ class ScriptedReactiveModel(BaseModelBackend):
 
     # Shared scheduler across agents in one process (tests inject one engine run).
     shared_scheduler: SocialInteractionScheduler | None = None
+    # Shared scenario text so offline stances stay thesis-specific (Phase 7.1).
+    shared_scenario: str = ""
 
     def __init__(self, *, agent_id: int = 0, label: str = "scripted") -> None:
         super().__init__(model_type=ModelType.GPT_4O_MINI, model_config_dict={})
@@ -176,14 +183,16 @@ class ScriptedReactiveModel(BaseModelBackend):
         # Never treat self as inter-agent partner evidence in content.
         assert plan.partner_agent_id is None or plan.partner_agent_id != self.agent_id
 
-        stance_seed = _scripted_stance_line(self.agent_id, round_n)
+        scenario = ScriptedReactiveModel.shared_scenario or self._scheduler.scenario or ""
+        stance_seed = _scripted_stance_line(self.agent_id, round_n, scenario=scenario)
+        syn = synthetic_tag()
 
         if not ids or plan.target_post_id is None:
             return (
                 "create_post",
                 {
                     "content": (
-                        f"[{self.label}:{self.agent_id}] Beitrag #{n} — "
+                        f"{syn} [{self.label}:{self.agent_id}] Beitrag #{n} — "
                         f"{stance_seed} "
                         f"(Runde {round_n}, Szenario-Reaktion)."
                     )
@@ -198,7 +207,7 @@ class ScriptedReactiveModel(BaseModelBackend):
                 {
                     "post_id": target,
                     "content": (
-                        f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                        f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
                         f"auf Post {target}. {stance_seed} "
                         f"(Partner "
                         f"{plan.partner_agent_id if plan.partner_agent_id is not None else 'n/a'}; "
@@ -224,6 +233,7 @@ class ScriptedReactiveModel(BaseModelBackend):
                     round_n=round_n,
                     partner=plan.partner_agent_id,
                     call_index=n,
+                    scenario=scenario,
                 )
                 return (
                     "create_comment",
@@ -237,7 +247,7 @@ class ScriptedReactiveModel(BaseModelBackend):
                 {
                     "post_id": target,
                     "content": (
-                        f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                        f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
                         f"auf Post {target}. {stance_seed} "
                         f"(kein parent_comment_id)."
                     ),
@@ -311,9 +321,70 @@ class ScriptedReactiveModel(BaseModelBackend):
         return self._run(messages, response_format, tools)
 
 
-def _scripted_stance_line(agent_id: int, round_n: int) -> str:
-    """Deterministic polarity seed for offline opinion scenarios."""
+def _scripted_stance_line(agent_id: int, round_n: int, *, scenario: str = "") -> str:
+    """Deterministic polarity seed — thesis-specific (mobility / income / generic)."""
+    domain = detect_topic_domain(scenario) if scenario else "mobility"
+    measure = measure_label(scenario, domain) if scenario else "Auto-Verbot"
     bucket = agent_id % 3
+
+    if domain == "income":
+        if round_n <= 1:
+            if bucket == 0:
+                return (
+                    f"Ich bin für ein {measure} — Existenzsicherung ohne "
+                    f"Sanktionsdruck stärkt Teilhabe."
+                )
+            if bucket == 1:
+                return (
+                    f"Ich lehne das {measure} ab — Finanzierung und Arbeitsanreize "
+                    f"ungeklärt; ohne Gegenfinanzierung riskant."
+                )
+            return (
+                "Zielkonflikt: Pilot mit klaren Abbruchkriterien und "
+                "Übergangsfristen statt Sofort-Vollauszahlung."
+            )
+        if round_n == 2:
+            if bucket == 0:
+                return "stimme zu: ja zum Grundeinkommen, mit Messpunkten."
+            if bucket == 1:
+                return "widerspreche: gegen das Grundeinkommen ohne Finanzierungsnachweis."
+            return (
+                "einerseits Absicherung, andererseits Haushaltsgrenzen — "
+                "Pilot mit Abbruchkriterien."
+            )
+        if agent_id % 2 == 0:
+            return (
+                "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
+                "Piloten und Ausnahmeregelungen statt pauschaler Vollauszahlung."
+            )
+        return (
+            "Ich halte dagegen und widerspreche klar: nein zur ungeprüften "
+            "Vollauszahlung ohne Gegenfinanzierung."
+        )
+
+    if domain != "mobility":
+        if round_n <= 1:
+            if bucket == 0:
+                return f"Ich bin für {measure} — Vorteile überwiegen bei Messpunkten."
+            if bucket == 1:
+                return f"Ich lehne {measure} ab — Kosten und Nebenwirkungen unzureichend belegt."
+            return (
+                "Zielkonflikt: schrittweise Einführung mit Ausnahmen statt Sofort-Vollumsetzung."
+            )
+        if round_n == 2:
+            if bucket == 0:
+                return f"stimme zu: ja zu {measure}, mit Messpunkten."
+            if bucket == 1:
+                return f"widerspreche: gegen {measure} ohne belastbare Evidenz."
+            return "einerseits Nutzen, andererseits Risiken — Pilot nötig."
+        if agent_id % 2 == 0:
+            return (
+                "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
+                "Piloten und Ausnahmen statt Sofortumsetzung."
+            )
+        return "Ich halte dagegen und widerspreche klar: nein zur ungeprüften Sofortumsetzung."
+
+    # Mobility (Berlin / Verbot) — preserve Phase 5–7 markers.
     if round_n <= 1:
         if bucket == 0:
             return "Ich bin für das Verbot — sinnvolles Verbot im Kerngebiet."
@@ -332,7 +403,6 @@ def _scripted_stance_line(agent_id: int, round_n: int) -> str:
         if bucket == 1:
             return "widerspreche: gegen das Verbot ohne soziale Abfederung."
         return "einerseits Schutz, andererseits Lieferfenster — Ausnahme für Anwohner."
-    # Round 3+: shift markers for half the society (evidenced change).
     if agent_id % 2 == 0:
         return (
             "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
@@ -349,45 +419,82 @@ def _scripted_ref_comment(
     round_n: int,
     partner: int | None,
     call_index: int,
+    scenario: str = "",
 ) -> str:
     """Local →Kommentar# content with agree/disagree/shift markers."""
-    if round_n >= 4:
-        # Consolidate: textual agree/disagree + confirmation or restatement.
-        if agent_id % 2 == 0:
-            body = (
-                "stimme zu und teile diese Einschätzung — "
-                "Ausnahmeregelungen bleiben zentral."
-            )
+    domain = detect_topic_domain(scenario) if scenario else "mobility"
+    syn = synthetic_tag()
+    if domain == "income":
+        if round_n >= 4:
+            if agent_id % 2 == 0:
+                body = (
+                    "stimme zu und teile diese Einschätzung — "
+                    "Piloten und Ausnahmeregelungen bleiben zentral."
+                )
+            else:
+                body = (
+                    "widerspreche weiterhin: sehe das anders — "
+                    "gegen das Grundeinkommen ohne Gegenfinanzierung."
+                )
+        elif round_n >= 3:
+            if (call_index + agent_id) % 2 == 0:
+                body = (
+                    "Ich ändere meine Position nach dem Kommentar — "
+                    "werde überzeugt von Piloten und Ausnahmeregelungen."
+                )
+            else:
+                body = (
+                    "Ich halte dagegen und widerspreche klar — "
+                    "lehne das Grundeinkommen ab ohne Finanzierungsnachweis."
+                )
         else:
-            body = (
-                "widerspreche weiterhin: sehe das anders — "
-                "gegen das Verbot ohne Lieferfenster."
-            )
-    elif round_n >= 3:
-        if (call_index + agent_id) % 2 == 0:
-            body = (
-                "Ich ändere meine Position nach dem Kommentar — "
-                "werde überzeugt von Ausnahmeregelungen."
-            )
-        else:
-            body = (
-                "Ich halte dagegen und widerspreche klar — "
-                "lehne das Verbot ab ohne soziale Abfederung."
-            )
+            if (call_index + agent_id) % 2 == 0:
+                body = (
+                    "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
+                    "stimme zu und werde überzeugt von Piloten."
+                )
+            else:
+                body = (
+                    "Ich halte dagegen und widerspreche klar — "
+                    "lehne das Grundeinkommen ab ohne Gegenfinanzierung."
+                )
     else:
-        # Round 2: keep Phase-5 shift markers so 2-round offline runs
-        # still evidence position_changed / influenced_by.
-        if (call_index + agent_id) % 2 == 0:
-            body = (
-                "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
-                "stimme zu und werde überzeugt von Ausnahmeregelungen."
-            )
+        if round_n >= 4:
+            if agent_id % 2 == 0:
+                body = (
+                    "stimme zu und teile diese Einschätzung — "
+                    "Ausnahmeregelungen bleiben zentral."
+                )
+            else:
+                body = (
+                    "widerspreche weiterhin: sehe das anders — "
+                    "gegen das Verbot ohne Lieferfenster."
+                )
+        elif round_n >= 3:
+            if (call_index + agent_id) % 2 == 0:
+                body = (
+                    "Ich ändere meine Position nach dem Kommentar — "
+                    "werde überzeugt von Ausnahmeregelungen."
+                )
+            else:
+                body = (
+                    "Ich halte dagegen und widerspreche klar — "
+                    "lehne das Verbot ab ohne soziale Abfederung."
+                )
         else:
-            body = (
-                "Ich halte dagegen und widerspreche klar — "
-                "lehne das Verbot ab ohne soziale Abfederung."
-            )
+            # Round 2: keep Phase-5 shift markers so 2-round offline runs
+            # still evidence position_changed / influenced_by.
+            if (call_index + agent_id) % 2 == 0:
+                body = (
+                    "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
+                    "stimme zu und werde überzeugt von Ausnahmeregelungen."
+                )
+            else:
+                body = (
+                    "Ich halte dagegen und widerspreche klar — "
+                    "lehne das Verbot ab ohne soziale Abfederung."
+                )
     return (
-        f"[{label}:{agent_id}] →Kommentar#{comment_id} {body} "
+        f"{syn} [{label}:{agent_id}] →Kommentar#{comment_id} {body} "
         f"(Runde {round_n}, Partner {partner}, kein parent_comment_id)."
     )
