@@ -1,4 +1,4 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 5."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 6."""
 from __future__ import annotations
 
 import hashlib
@@ -14,13 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.config import LIVE_TEST_MAX_AGENTS, settings  # noqa: E402
+from backend.config import (  # noqa: E402
+    LIVE_TEST_MAX_AGENTS,
+    OFFLINE_MAX_AGENTS,
+    OFFLINE_SCALE_PRESETS,
+    settings,
+)
 from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
 
-# Fingerprint of key Phase-5 modules — dashboard can detect a stale :5001 process.
-_PHASE5_MARKERS = (
+# Fingerprint of key Phase-6 modules — dashboard can detect a stale :5001 process.
+_PHASE6_MARKERS = (
     ROOT / "backend" / "app.py",
     ROOT / "backend" / "config.py",
     ROOT / "backend" / "simulation" / "engine.py",
@@ -28,12 +33,14 @@ _PHASE5_MARKERS = (
     ROOT / "backend" / "simulation" / "knowledge_graph.py",
     ROOT / "backend" / "simulation" / "oasis_reply.py",
     ROOT / "backend" / "simulation" / "social_dynamics.py",
+    ROOT / "backend" / "simulation" / "social_scheduler.py",
+    ROOT / "backend" / "simulation" / "scripted_model.py",
 )
 
 
 def _code_revision() -> str:
     h = hashlib.sha1()
-    for path in _PHASE5_MARKERS:
+    for path in _PHASE6_MARKERS:
         try:
             h.update(path.read_bytes())
         except OSError:
@@ -42,7 +49,7 @@ def _code_revision() -> str:
 
 
 CODE_REVISION = _code_revision()
-EXPECTED_PHASE = "5"
+EXPECTED_PHASE = "6"
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": settings.cors_origins}})
@@ -103,7 +110,11 @@ def health():
 
 @app.get("/api/agents")
 def agents():
-    """Preview profiles. Query: scenario, count, generation=dynamic|fixed_test."""
+    """Preview profiles. Query: scenario, count, generation=dynamic|fixed_test.
+
+    Count may reach OFFLINE_MAX_AGENTS (50) for offline/manual previews.
+    Live-LLM starts still clamp to 5 in the engine.
+    """
     scenario = (request.args.get("scenario") or "").strip()
     # Phase 3 default is dynamic — fixed_test only when explicitly requested.
     generation = (request.args.get("generation") or "dynamic").strip().lower()
@@ -112,28 +123,33 @@ def agents():
         count = int(raw_count) if raw_count is not None else LIVE_TEST_MAX_AGENTS
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "count muss eine Zahl sein"}), 400
-    count = max(1, min(count, LIVE_TEST_MAX_AGENTS))
+    count = max(1, min(count, OFFLINE_MAX_AGENTS))
     if generation in {"fixed", "test", "default"}:
         generation = "fixed_test"
     if not scenario and generation == "dynamic":
         # Without a scenario, fall back to the classic roster preview.
+        preview_n = min(count, LIVE_TEST_MAX_AGENTS)
         return jsonify(
             {
-                "agents": profiles_payload()[:count],
-                "agent_count": count,
+                "agents": profiles_payload()[:preview_n],
+                "agent_count": preview_n,
                 "agent_generation": "fixed_test",
+                "offline_max_agents": OFFLINE_MAX_AGENTS,
+                "scale_presets": list(OFFLINE_SCALE_PRESETS),
                 "note": "Kein Szenario — fixed_test Preview.",
             }
         )
     if generation == "dynamic" and scenario:
         profiles = generate_agents(
-            scenario, count, mode="dynamic", max_agents=LIVE_TEST_MAX_AGENTS
+            scenario, count, mode="dynamic", max_agents=OFFLINE_MAX_AGENTS
         )
         return jsonify(
             {
                 "agents": [p.to_dict() for p in profiles],
                 "agent_count": len(profiles),
                 "agent_generation": "dynamic",
+                "offline_max_agents": OFFLINE_MAX_AGENTS,
+                "scale_presets": list(OFFLINE_SCALE_PRESETS),
             }
         )
     profiles = generate_agents(
@@ -147,6 +163,8 @@ def agents():
             "agents": [p.to_dict() for p in profiles],
             "agent_count": len(profiles),
             "agent_generation": "fixed_test",
+            "offline_max_agents": OFFLINE_MAX_AGENTS,
+            "scale_presets": list(OFFLINE_SCALE_PRESETS),
         }
     )
 

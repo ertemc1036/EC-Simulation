@@ -428,11 +428,18 @@ class LocalKnowledgeGraph:
             "edges": edges,
             "note": (
                 "Lokaler Wissensgraph (Akteure / Themen / Aussagen). "
-                "Phase-5 Social-Kanten agrees_with / disagrees_with / "
+                "Phase-5/6 Social-Kanten agrees_with / disagrees_with / "
                 "responds_to / influenced_by / position_changed nur belegt "
                 "(Like/Dislike und/oder Textmarker + →Kommentar#). "
-                "OASIS: kein parent_comment_id — lokale Kommentar-Refs."
+                "OASIS: kein parent_comment_id — lokale Kommentar-Refs. "
+                "Skalierung: Offline 10/25/50 Agenten; Live-LLM weiter ≤5."
             ),
+            "network": {
+                "actors": by_kind.get("actor", 0),
+                "statements": by_kind.get("statement", 0),
+                "topics": by_kind.get("topic", 0),
+                "social_edges": sum(social.values()),
+            },
         }
 
 

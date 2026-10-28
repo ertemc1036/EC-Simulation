@@ -17,6 +17,8 @@ Phase 5.2 (live-run 7f75d2e4):
 - Policy polarity: Ausnahme vs. volles Verbot (``exception``) is stable
 - Lexicon avoids false pro/contra from Support-/Kompromiss-Substrings
 - Textual ``agrees_with`` / ``disagrees_with`` only with comment-ref evidence
+
+Phase 6: polarity distribution + scale-safe payloads for 10/25/50 offline.
 """
 from __future__ import annotations
 
@@ -556,19 +558,29 @@ class PositionTracker:
                 hist[-1] = pos
         return changes
 
+    def polarity_distribution(self) -> dict[str, int]:
+        """Histogram of current polarities — dashboard Positionsverteilung."""
+        dist: dict[str, int] = {}
+        for pos in self._current.values():
+            key = pos.polarity or "unknown"
+            dist[key] = dist.get(key, 0) + 1
+        return dict(sorted(dist.items()))
+
     def positions_payload(self) -> dict[str, Any]:
         items = [p.to_dict() for p in sorted(self._current.values(), key=lambda x: x.agent_id)]
         return {
             "backend": "local",
             "agent_count": len(items),
             "change_count": len(self._change_events),
+            "polarity_distribution": self.polarity_distribution(),
             "positions": items,
             "changes": list(self._change_events),
             "note": (
                 "Persistente Agentenpositionen aus Goal-Seed + Posts/Kommentaren. "
                 "Seed-Impulse und Erstposition ≠ Wechsel; position_changed / "
                 "influenced_by nur bei belegtem Stance-Wechsel "
-                "(Bestätigung / Ausnahme-Restatement zählen nicht)."
+                "(Bestätigung / Ausnahme-Restatement zählen nicht). "
+                "Phase 6: polarity_distribution für Society-Übersicht 10/25/50."
             ),
         }
 

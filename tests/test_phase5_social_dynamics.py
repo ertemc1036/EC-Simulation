@@ -61,7 +61,7 @@ def test_limits_unchanged():
     assert cfg.max_tokens_per_call == 500
     assert cfg.max_cost_usd_per_run == 0.20
     assert cfg.max_parallel_llm_calls == 1
-    assert cfg.status_payload()["phase"] == "5"
+    assert cfg.status_payload()["phase"] == "6"
     assert cfg.status_payload()["llm_run_requires_approval"] is True
 
 
@@ -301,7 +301,7 @@ def test_scripted_phase5_run_positions_and_relations(results_dir: Path):
 
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 5
+    assert data["meta"]["phase"] == 6
     assert data["meta"]["prompt_bundle_id"] == PROMPT_BUNDLE_ID
     assert data["meta"]["token_optimization"]["approval_gate"] is True
     assert data["meta"]["token_optimization"]["atomic_reserve"] is True
