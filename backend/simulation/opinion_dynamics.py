@@ -1,25 +1,28 @@
-"""Phase 7 + 8.2 + 8.3 — Opinion dynamics chronology (V3).
+"""Phase 7 + 8.2–8.4 — Opinion dynamics chronology (V4).
 
 Builds on PositionTracker change events. Does not invent polarity flips.
 V2 adds stance clarity, stability, polarization, and unknown-share series.
 V3 adds grounded-reply share and motivation-linked stability signals.
+V4 treats ``shifting`` as unclear for clarity math and tracks evidenced
+conditional targets (scripted mind-change without bare shifting polarity).
 """
 from __future__ import annotations
 
 import math
 from typing import Any
 
-QUALITY_FIX = "8.3"
-OPINION_ENGINE = "v3"
+QUALITY_FIX = "8.4"
+OPINION_ENGINE = "v4"
+
+# Polarities that dilute stance clarity (unknown-like for Opinion V4).
+_UNCLEAR_POLARITIES = frozenset({"unknown", "uncertain", "shifting"})
 
 
 def _unknown_share(polarity_distribution: dict[str, int]) -> float:
     total = sum(int(v) for v in (polarity_distribution or {}).values()) or 0
     if total <= 0:
         return 1.0
-    unk = int((polarity_distribution or {}).get("unknown") or 0) + int(
-        (polarity_distribution or {}).get("uncertain") or 0
-    )
+    unk = sum(int((polarity_distribution or {}).get(k) or 0) for k in _UNCLEAR_POLARITIES)
     return round(unk / float(total), 4)
 
 
@@ -53,8 +56,15 @@ def _entropy(polarity_distribution: dict[str, int]) -> float:
     return round(min(1.0, h / math.log(5, 2)), 4)
 
 
+def _shifting_share(polarity_distribution: dict[str, int]) -> float:
+    total = sum(int(v) for v in (polarity_distribution or {}).values()) or 0
+    if total <= 0:
+        return 0.0
+    return round(int((polarity_distribution or {}).get("shifting") or 0) / float(total), 4)
+
+
 class OpinionDynamics:
-    """Round-by-round polarity chronology and shift analytics (V3)."""
+    """Round-by-round polarity chronology and shift analytics (V4)."""
 
     def __init__(self, *, max_rounds_tracked: int = 16) -> None:
         self.max_rounds_tracked = max(1, int(max_rounds_tracked))
@@ -62,20 +72,23 @@ class OpinionDynamics:
         self._seen_steps: set[int] = set()
         self._grounded_reply_share: float | None = None
         self._motivation_coverage: float | None = None
+        self._weak_overlap_rate: float | None = None
 
     def clear(self) -> None:
         self._round_snapshots.clear()
         self._seen_steps.clear()
         self._grounded_reply_share = None
         self._motivation_coverage = None
+        self._weak_overlap_rate = None
 
     def set_interaction_signals(
         self,
         *,
         grounded_reply_share: float | None = None,
         motivation_coverage: float | None = None,
+        weak_overlap_rate: float | None = None,
     ) -> None:
-        """Optional V3 signals from Interaction Quality / Persona Motivation."""
+        """Optional V3/V4 signals from Interaction Quality / Persona Motivation."""
         if grounded_reply_share is not None:
             self._grounded_reply_share = max(
                 0.0, min(1.0, float(grounded_reply_share))
@@ -84,6 +97,8 @@ class OpinionDynamics:
             self._motivation_coverage = max(
                 0.0, min(1.0, float(motivation_coverage))
             )
+        if weak_overlap_rate is not None:
+            self._weak_overlap_rate = max(0.0, min(1.0, float(weak_overlap_rate)))
 
     def record_round(
         self,
@@ -105,10 +120,12 @@ class OpinionDynamics:
             "agent_count": agent_count,
             "stance_clarity": clarity,
             "unknown_share": unk,
+            "shifting_share": _shifting_share(dist),
             "polarization": _polarization(dist),
             "entropy": _entropy(dist),
             "grounded_reply_share": self._grounded_reply_share,
             "motivation_coverage": self._motivation_coverage,
+            "weak_overlap_rate": self._weak_overlap_rate,
         }
         if step_i in self._seen_steps:
             # Refresh the existing frame for the same step (latest sync wins).
@@ -172,15 +189,20 @@ class OpinionDynamics:
             stability = round(max(0.0, 1.0 - (sum(deltas) / len(deltas))), 4)
         else:
             stability = 1.0 if clarities else 0.0
-        # V3: boost stability slightly when motivation coverage is high and
-        # grounded replies dominate (fewer invented attributions → smoother dynamics).
+        # V3/V4: boost stability slightly when motivation coverage is high and
+        # grounded replies dominate; soft penalty for weak overlaps.
         if self._motivation_coverage is not None and self._grounded_reply_share is not None:
+            weak_pen = 0.04 * float(self._weak_overlap_rate or 0.0)
             stability = round(
                 min(
                     1.0,
-                    stability * 0.85
-                    + 0.10 * float(self._motivation_coverage)
-                    + 0.05 * float(self._grounded_reply_share),
+                    max(
+                        0.0,
+                        stability * 0.85
+                        + 0.10 * float(self._motivation_coverage)
+                        + 0.05 * float(self._grounded_reply_share)
+                        - weak_pen,
+                    ),
                 ),
                 4,
             )
@@ -191,7 +213,7 @@ class OpinionDynamics:
         return {
             "backend": "local",
             "engine": OPINION_ENGINE,
-            "version": 3,
+            "version": 4,
             "quality_fix": QUALITY_FIX,
             "rounds_tracked": rounds,
             "total_evidenced_changes": total_changes,
@@ -199,19 +221,21 @@ class OpinionDynamics:
             "transitions": dict(sorted(transitions.items())),
             "stance_clarity": final_clarity,
             "unknown_share": final_unk,
+            "shifting_share": _shifting_share(final_dist),
             "stability_index": stability,
             "polarization": _polarization(final_dist),
             "entropy": _entropy(final_dist),
             "grounded_reply_share": self._grounded_reply_share,
             "motivation_coverage": self._motivation_coverage,
+            "weak_overlap_rate": self._weak_overlap_rate,
             "unknown_share_by_round": [
                 {"step": f.get("step"), "unknown_share": f.get("unknown_share")}
                 for f in frames
             ],
             "chronology": frames,
             "note": (
-                "Meinungsdynamik V3: Chronologie + Stance-Klarheit, Stabilität, "
-                "Polarisierung, Antwortbezug-/Motivationssignale. "
+                "Meinungsdynamik V4: Chronologie + Stance-Klarheit (shifting "
+                "zählt als unklar), Stabilität, Polarisierung, Grounding-Floor. "
                 "Keine erfundenen Flips; Scripted liefert Offline-Evidenz."
             ),
         }

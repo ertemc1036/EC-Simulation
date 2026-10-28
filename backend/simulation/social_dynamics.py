@@ -32,6 +32,12 @@ Phase 8.3 Stance Classification V3: education live fixture
 ``20261028T142011Z-d1fb1b1c`` — Thomas Bauer (Eltern): Potenzial +
 Voraussetzungen / Vollausrollung riskant → ``conditional``; soft-support +
 Evidenzlücke → ``conditional`` (nicht hart ``pro``).
+
+Phase 8.4 Stance Classification V4 (fixture ``e251172c`` audit):
+- bare ``dafür`` removed (false pro on «plädiere ich dafür, dass … nicht»)
+- conditional lexicon: schrittweise, Elternbeteiligung, Datenschutzregeln
+- false-pro guard: soft-support + caveat lexicon → ``conditional``
+- shift markers with clear target polarity → that polarity (not bare ``shifting``)
 """
 from __future__ import annotations
 
@@ -40,8 +46,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-STANCE_CLASSIFIER = "v3"
-STANCE_QUALITY_FIX = "8.3"
+STANCE_CLASSIFIER = "v4"
+STANCE_QUALITY_FIX = "8.4"
 
 # Phase-5 social relations — only emit when evidenced.
 SOCIAL_RELATIONS = frozenset(
@@ -96,8 +102,13 @@ _EXCEPTION_MARKERS = (
 )
 
 # Pro toward the ban / measure — avoid matching "Unterstützung" (aid).
+# Phase 8.4: bare "dafür" removed — hits «plädiere ich dafür, dass … nicht».
+# Positive assent uses phrase forms / _PRO_BAN_RE / soft-support instead.
 _PRO_MARKERS = (
-    "dafür",
+    "bin dafür",
+    "klar dafür",
+    "stimme dafür",
+    "dafür bin ich",
     "befürwort",
     "bin für das",
     "bin für ein",
@@ -395,6 +406,24 @@ _CONDITIONAL_MARKERS = (
     "belastbare studien",
     "vor der flächendeckenden",
     "vor der flaechendeckenden",
+    # Phase 8.4 education fixture e251172c — Thomas C2 / Fatima C4.
+    "schrittweise",
+    "nicht überhastet",
+    "nicht ueberhastet",
+    "wenn sie richtig eingesetzt",
+    "richtig eingesetzt werden",
+    "beteiligung der eltern",
+    "beteiligung der eltern und lehrkräfte",
+    "beteiligung der eltern und lehrkraefte",
+    "klare datenschutzregeln",
+    "datenschutzregeln und transparenz",
+    "pädagogisch fundierte konzepte",
+    "paedagogisch fundierte konzepte",
+    "pädagogische verantwortung",
+    "paedagogische verantwortung",
+    "nicht einfach technikgetrieben",
+    "nicht technikgetrieben",
+    "technikgetrieben erfolgen darf",
 )
 
 # Soft reject of *unconditional / blanket* rollout while keeping caveated support
@@ -453,6 +482,43 @@ _EVIDENCE_CAVEAT_MARKERS = (
     "datenlage",
 )
 
+# Phase 8.4 false-pro guard: soft-support + caveat lexicon → conditional
+# even when soft-reject / explicit conditional markers miss (Thomas C2).
+_FALSE_PRO_CAVEAT_MARKERS = (
+    "datenschutz",
+    "datenschutzregeln",
+    "transparenz",
+    "schrittweise",
+    "nicht überhastet",
+    "nicht ueberhastet",
+    "beteiligung der eltern",
+    "eltern und lehrkräfte",
+    "eltern und lehrkraefte",
+    "zugang zu dieser technologie",
+    "digitale kluft",
+    "digitale gräben",
+    "digitale graeben",
+    "pädagogisch",
+    "paedagogisch",
+    "technikgetrieben",
+    "lernqualität",
+    "lernqualitaet",
+)
+
+# Clear post-shift target language → prefer that polarity over bare "shifting".
+_SHIFT_TARGET_CONDITIONAL = (
+    "piloten und ausnahme",
+    "piloten und ausnahmen",
+    "nur mit pilot",
+    "nur mit ausnahme",
+    "ausnahmeregelungen statt",
+    "ausnahmen statt",
+    "schrittweise einführung",
+    "mit klaren abbruch",
+    "klare abbruchkriterien",
+    "kompromiss",
+)
+
 
 def extract_local_comment_refs(content: str) -> list[int]:
     """Parse local comment references from free text (OASIS has no parent_id)."""
@@ -487,6 +553,14 @@ def _evidence_caveat(low: str) -> bool:
     return any(m in low for m in _EVIDENCE_CAVEAT_MARKERS)
 
 
+def _false_pro_caveat(low: str) -> bool:
+    return any(m in low for m in _FALSE_PRO_CAVEAT_MARKERS)
+
+
+def _shift_target_conditional(low: str) -> bool:
+    return any(m in low for m in _SHIFT_TARGET_CONDITIONAL)
+
+
 def _polarity(text: str) -> str:
     """Coarse stance: pro/contra/conditional/uncertain/unknown (+ legacy exception).
 
@@ -499,6 +573,9 @@ def _polarity(text: str) -> str:
 
     Phase 8.3 (V3): soft-support + Evidenzlücke/Voraussetzungen → ``conditional``
     (Thomas Bauer / Lehrkraft Potenzial-mit-Vorbehalt, not hard ``pro``).
+
+    Phase 8.4 (V4): bare ``dafür`` hygiene; false-pro guard on soft-support +
+    caveat lexicon; shift+clear target → polarity (not bare ``shifting``).
     """
     raw = text or ""
     if _is_seed_content(raw):
@@ -510,13 +587,15 @@ def _polarity(text: str) -> str:
     evidence_caveat = _evidence_caveat(low)
     if evidence_caveat:
         conditional_hit += 1
+    false_pro_caveat = _false_pro_caveat(low)
     pro = sum(1 for m in _PRO_MARKERS if m in low)
     if _PRO_BAN_RE.search(low):
         pro += 1
     # Soft support phrasing common in live labor debates.
     if "grundsätzlich positiv" in low:
         pro += 1
-    if _soft_support_signal(low):
+    soft_support = _soft_support_signal(low)
+    if soft_support:
         pro += 1
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
     hard_reject = bool(_CONTRA_REJECT_RE.search(low))
@@ -537,12 +616,19 @@ def _polarity(text: str) -> str:
     mediating = sum(1 for m in _MEDIATING_MARKERS if m in low)
     # BGE balancing (Anreize/Löhne) only when not a hard reject.
     exception = classic_exception + (bge_balance if contra == 0 else 0)
+    shift_hit = any(m in low for m in _SHIFT_MARKERS)
 
     # Phase 8.2: Chancen/Potenzial + soft unconditional reject → conditional.
-    if soft_reject and (_soft_support_signal(low) or conditional_hit or pro > 0):
+    if soft_reject and (soft_support or conditional_hit or pro > 0):
         return "conditional"
     # Phase 8.3: soft support + evidence/condition caveats → conditional (not pro).
-    if _soft_support_signal(low) and (evidence_caveat or conditional_hit > 0):
+    if soft_support and (evidence_caveat or conditional_hit > 0):
+        return "conditional"
+    # Phase 8.4: soft support + caveat lexicon without soft-reject → conditional.
+    if soft_support and false_pro_caveat and not soft_reject:
+        return "conditional"
+    # Phase 8.4: explicit mind-change toward conditional target → conditional.
+    if shift_hit and _shift_target_conditional(low) and contra == 0:
         return "conditional"
     # Explicit conditional language wins when not a pure hard reject.
     if conditional_hit and not (contra > conditional_hit and not soft_reject):
@@ -569,18 +655,23 @@ def _polarity(text: str) -> str:
         return "uncertain"
     if mediating and pro == 0 and contra == 0:
         return "uncertain"
-    if any(m in low for m in _SHIFT_MARKERS):
+    if shift_hit:
         return "shifting"
     return "unknown"
 
 
 def classify_stance_v2(text: str) -> str:
-    """Public Stance Classification V2/V3 entry point (alias of ``_polarity``)."""
+    """Public Stance Classification V2+ entry point (alias of ``_polarity``)."""
     return _polarity(text)
 
 
 def classify_stance_v3(text: str) -> str:
-    """Public Stance Classification V3 entry point (Phase 8.3)."""
+    """Public Stance Classification V3+ entry point (alias of ``_polarity``)."""
+    return _polarity(text)
+
+
+def classify_stance_v4(text: str) -> str:
+    """Public Stance Classification V4 entry point (Phase 8.4)."""
     return _polarity(text)
 
 

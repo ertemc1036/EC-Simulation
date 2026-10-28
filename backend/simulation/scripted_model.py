@@ -370,9 +370,11 @@ def _scripted_stance_line(agent_id: int, round_n: int, *, scenario: str = "") ->
                 "Pilot mit Abbruchkriterien."
             )
         if agent_id % 2 == 0:
+            # Phase 8.4: mind-change evidence + clear conditional target (not bare shifting).
             return (
                 "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-                "Piloten und Ausnahmeregelungen statt pauschaler Vollauszahlung."
+                "Piloten und Ausnahmeregelungen statt pauschaler Vollauszahlung "
+                "(nur mit Pilot und klaren Abbruchkriterien)."
             )
         return (
             "Ich halte dagegen und widerspreche klar: nein zur ungeprüften "
@@ -397,7 +399,7 @@ def _scripted_stance_line(agent_id: int, round_n: int, *, scenario: str = "") ->
         if agent_id % 2 == 0:
             return (
                 "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-                "Piloten und Ausnahmen statt Sofortumsetzung."
+                "Piloten und Ausnahmen statt Sofortumsetzung (nur mit Pilot)."
             )
         return "Ich halte dagegen und widerspreche klar: nein zur ungeprüften Sofortumsetzung."
 
@@ -423,7 +425,7 @@ def _scripted_stance_line(agent_id: int, round_n: int, *, scenario: str = "") ->
     if agent_id % 2 == 0:
         return (
             "Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-            "Ausnahmeregelungen statt pauschalem Verbot."
+            "Ausnahmeregelungen statt pauschalem Verbot (nur mit Ausnahmen)."
         )
     return "Ich halte dagegen und widerspreche klar: nein zum pauschalen Verbot."
 
@@ -458,7 +460,8 @@ def _scripted_ref_comment(
             if (call_index + agent_id) % 2 == 0:
                 body = (
                     "Ich ändere meine Position nach dem Kommentar — "
-                    "werde überzeugt von Piloten und Ausnahmeregelungen."
+                    "werde überzeugt von Piloten und Ausnahmeregelungen "
+                    "(nur mit Pilot und klaren Abbruchkriterien)."
                 )
             else:
                 body = (
@@ -467,9 +470,11 @@ def _scripted_ref_comment(
                 )
         else:
             if (call_index + agent_id) % 2 == 0:
+                # Phase 8.4: Kompromiss + conditional target → not bare shifting.
                 body = (
                     "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
-                    "stimme zu und werde überzeugt von Piloten."
+                    "stimme zu und werde überzeugt von Piloten und Ausnahmeregelungen "
+                    "(nur mit Pilot)."
                 )
             else:
                 body = (
@@ -492,7 +497,8 @@ def _scripted_ref_comment(
             if (call_index + agent_id) % 2 == 0:
                 body = (
                     "Ich ändere meine Position nach dem Kommentar — "
-                    "werde überzeugt von Ausnahmeregelungen."
+                    "werde überzeugt von Ausnahmeregelungen statt pauschalem Verbot "
+                    "(nur mit Ausnahmen)."
                 )
             else:
                 body = (
@@ -501,11 +507,12 @@ def _scripted_ref_comment(
                 )
         else:
             # Round 2: keep Phase-5 shift markers so 2-round offline runs
-            # still evidence position_changed / influenced_by.
+            # still evidence position_changed / influenced_by; V4 maps to conditional.
             if (call_index + agent_id) % 2 == 0:
                 body = (
                     "Ich ändere meine Position nach dem Kommentar — Kompromiss. "
-                    "stimme zu und werde überzeugt von Ausnahmeregelungen."
+                    "stimme zu und werde überzeugt von Ausnahmeregelungen "
+                    "(nur mit Ausnahmen)."
                 )
             else:
                 body = (

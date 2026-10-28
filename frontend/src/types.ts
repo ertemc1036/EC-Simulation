@@ -321,6 +321,9 @@ export interface InteractionQualitySnapshot {
     grounded_reply_rate?: number
     invented_attribution_rate?: number
     mean_grounding_score?: number
+    weak_overlap_rate?: number
+    weak_overlap_count?: number
+    overlap_floor?: number
     reply_count?: number
   }
   persona_motivation?: Record<string, unknown>

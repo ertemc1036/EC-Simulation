@@ -1,7 +1,7 @@
-"""Phase 8.3 — Argument-Grounded Interaction V3 + Interaction Quality Evaluation.
+"""Phase 8.3–8.4 — Argument-Grounded Interaction + Interaction Quality.
 
-Measures whether replies actually address the referenced parent argument
-(Antwortbezug), not just polite agreement with invented attributions.
+V3: Antwortbezug via Token-/Themen-Overlap + Attribution-Check.
+V4: Grounding-Floor (weak_overlap warning/score pressure) + Bildung↔IT bags.
 Offline lexical heuristics only — no provider calls.
 """
 from __future__ import annotations
@@ -11,9 +11,12 @@ from typing import Any
 
 from backend.simulation.social_dynamics import extract_local_comment_refs
 
-QUALITY_FIX = "8.3"
-GROUNDED_ENGINE = "v3"
-INTERACTION_QUALITY_ENGINE = "v3"
+QUALITY_FIX = "8.4"
+GROUNDED_ENGINE = "v4"
+INTERACTION_QUALITY_ENGINE = "v4"
+
+# Overlap below this while still grounded → weak floor (Phase 8.4 / C6 class).
+GROUNDING_OVERLAP_FLOOR = 0.20
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
 _ATTR_RE = re.compile(
@@ -76,12 +79,14 @@ _THEME_BAGS: tuple[frozenset[str], ...] = (
             "studie",
             "studien",
             "datenlage",
+            "datenbasis",
             "evaluation",
             "evaluationsstandard",
             "pilot",
             "piloten",
             "pilotprojekt",
             "pilotprojekte",
+            "pilotphasen",
             "belastbar",
             "wirksamkeit",
             "lernleistung",
@@ -91,6 +96,9 @@ _THEME_BAGS: tuple[frozenset[str], ...] = (
             "langfristig",
             "begleitung",
             "wissenschaftlich",
+            "nebenwirkungen",
+            "motivation",
+            "selbststeuerung",
         }
     ),
     frozenset(
@@ -139,6 +147,25 @@ _THEME_BAGS: tuple[frozenset[str], ...] = (
             "entlast",
             "arbeitsbelastung",
             "rolle",
+        }
+    ),
+    # Phase 8.4: Bildung ↔ IT bridge (Hannah C6 ↔ Thomas IT-Eltern).
+    frozenset(
+        {
+            "technologie",
+            "technologisch",
+            "technisch",
+            "ki-lernassistent",
+            "lernassistent",
+            "lernassistenten",
+            "it-projektleiter",
+            "projektleiter",
+            "digital",
+            "digitale",
+            "system",
+            "systeme",
+            "bildungswissenschaftlich",
+            "bildungswissenschaft",
         }
     ),
 )
@@ -212,6 +239,7 @@ def score_reply_grounding(
             "is_reply": False,
             "score": 1.0,
             "overlap": 0.0,
+            "weak_overlap": False,
             "invented_attribution": False,
             "missing_parent_themes": [],
             "claimed_spans": [],
@@ -248,11 +276,15 @@ def score_reply_grounding(
     )
     if invented:
         grounded = False
+    weak_overlap = bool(grounded and overlap < GROUNDING_OVERLAP_FLOOR)
     score = overlap
     if invented:
         score = max(0.0, score - 0.35)
     elif grounded:
         score = min(1.0, score + 0.15 + 0.1 * thematic)
+        # Phase 8.4 grounding floor: soft score pressure on fragile overlap.
+        if weak_overlap:
+            score = max(0.0, score - 0.08)
     score = round(max(0.0, min(1.0, score)), 4)
 
     return {
@@ -260,12 +292,14 @@ def score_reply_grounding(
         "is_reply": True,
         "score": score,
         "overlap": overlap,
+        "weak_overlap": weak_overlap,
         "invented_attribution": invented,
         "missing_parent_themes": missing[:6],
         "claimed_spans": claimed[:4],
         "parent_comment_id": parent_comment_id or (refs[0] if refs else None),
         "engine": GROUNDED_ENGINE,
         "quality_fix": QUALITY_FIX,
+        "overlap_floor": GROUNDING_OVERLAP_FLOOR,
     }
 
 
@@ -273,7 +307,7 @@ def evaluate_argument_grounded_interactions(
     *,
     comments: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Argument-Grounded Interaction V3 snapshot over a comment thread."""
+    """Argument-Grounded Interaction V4 snapshot over a comment thread."""
     by_id = {
         int(c["comment_id"]): c
         for c in (comments or [])
@@ -299,6 +333,7 @@ def evaluate_argument_grounded_interactions(
     n = len(evaluations)
     grounded_n = sum(1 for e in evaluations if e.get("grounded"))
     invented_n = sum(1 for e in evaluations if e.get("invented_attribution"))
+    weak_n = sum(1 for e in evaluations if e.get("weak_overlap"))
     mean_score = (
         round(sum(float(e.get("score") or 0.0) for e in evaluations) / n, 4)
         if n
@@ -306,6 +341,7 @@ def evaluate_argument_grounded_interactions(
     )
     grounded_rate = round(grounded_n / n, 4) if n else 1.0
     invented_rate = round(invented_n / n, 4) if n else 0.0
+    weak_rate = round(weak_n / n, 4) if n else 0.0
     return {
         "backend": "local",
         "engine": GROUNDED_ENGINE,
@@ -316,11 +352,15 @@ def evaluate_argument_grounded_interactions(
         "mean_grounding_score": mean_score,
         "invented_attribution_count": invented_n,
         "invented_attribution_rate": invented_rate,
+        "weak_overlap_count": weak_n,
+        "weak_overlap_rate": weak_rate,
+        "overlap_floor": GROUNDING_OVERLAP_FLOOR,
         "evaluations": evaluations[-24:],
         "ok": (n == 0) or (grounded_rate >= 0.5 and invented_rate <= 0.5),
         "note": (
-            "Argument-Grounded Interaction V3: Antwortbezug via Token-Overlap "
-            "und Attribution-Check — erfundene Eltern-Themen senken den Score."
+            "Argument-Grounded Interaction V4: Antwortbezug + Attribution-Check "
+            f"+ Grounding-Floor (overlap < {GROUNDING_OVERLAP_FLOOR}) — "
+            "erfundene Eltern-Themen und fragile Overlaps senken den Score."
         ),
     }
 
@@ -333,7 +373,7 @@ def build_interaction_quality(
     debate_quality_score: float = 0.0,
     opinion_stability: float = 0.0,
 ) -> dict[str, Any]:
-    """Composite Interaction Quality Evaluation for the Quality Dashboard."""
+    """Composite Interaction Quality Evaluation for the Quality Dashboard V4."""
     from backend.simulation.persona_motivation import motivation_coverage
 
     grounded = evaluate_argument_grounded_interactions(comments=comments)
@@ -341,6 +381,7 @@ def build_interaction_quality(
     g_rate = float(grounded.get("grounded_reply_rate") or 0.0)
     g_score = float(grounded.get("mean_grounding_score") or 0.0)
     invent = float(grounded.get("invented_attribution_rate") or 0.0)
+    weak = float(grounded.get("weak_overlap_rate") or 0.0)
     mot_cov = float(mot.get("coverage") or 0.0)
     clarity = max(0.0, min(1.0, float(stance_clarity or 0.0)))
     debate = max(0.0, min(1.0, float(debate_quality_score or 0.0)))
@@ -357,7 +398,8 @@ def build_interaction_quality(
                 + 0.14 * debate
                 + 0.12 * mot_cov
                 + 0.08 * stability
-                - 0.20 * invent,
+                - 0.20 * invent
+                - 0.06 * weak,
             ),
         ),
         4,
@@ -371,6 +413,7 @@ def build_interaction_quality(
             "grounded_reply_rate": g_rate,
             "mean_grounding_score": g_score,
             "invented_attribution_rate": invent,
+            "weak_overlap_rate": weak,
             "stance_clarity": round(clarity, 4),
             "debate_quality_score": round(debate, 4),
             "persona_motivation_coverage": mot_cov,
@@ -380,7 +423,8 @@ def build_interaction_quality(
         "persona_motivation": mot,
         "ok": composite >= 0.45 and invent <= 0.5 and clarity >= 0.5,
         "note": (
-            "Interaction Quality Evaluation (Phase 8.3): Antwortbezug, "
-            "Persona-Motivation, Stance-Klarheit und Debate Quality — offline."
+            "Interaction Quality Evaluation (Phase 8.4): Antwortbezug, "
+            "Grounding-Floor, Persona-Motivation, Stance-Klarheit und Debate "
+            "Quality — offline."
         ),
     }

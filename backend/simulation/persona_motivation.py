@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 PERSONA_ENGINE = "v4"
-QUALITY_FIX = "8.3"
+QUALITY_FIX = "8.4"
 
 _DOMAIN_MOTIVATIONS: dict[str, dict[str, Any]] = {
     "education": {
