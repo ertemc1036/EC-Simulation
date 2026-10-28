@@ -100,7 +100,7 @@ def test_live_ceilings_unchanged_phase731():
     payload = cfg.status_payload()
     assert payload["llm_run_requires_approval"] is True
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
-    assert payload["society_intelligence"]["quality_fix"] in {"7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3", "8.4"}
+    assert payload["society_intelligence"]["quality_fix"] in {"7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}
 
 
 def test_fixture_documents_bge_leak_before_fix():
@@ -194,7 +194,7 @@ def test_argument_history_reingest_does_not_inflate_repetition():
     assert snap["argument_count"] == 6
     assert snap["repetition_blocks"] == 0
     assert snap["self_replies"] == 0
-    assert snap["quality_fix"] in {"7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3", "8.4"}
+    assert snap["quality_fix"] in {"7.3.1", "7.3.2", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}
 
 
 def test_position_recognition_on_live_fixture_comments():

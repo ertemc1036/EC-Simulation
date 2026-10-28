@@ -1,7 +1,8 @@
-"""Phase 8.3–8.4 — Argument-Grounded Interaction + Interaction Quality.
+"""Phase 8.3–8.5 — Argument-Grounded + Interaction Quality V5.
 
 V3: Antwortbezug via Token-/Themen-Overlap + Attribution-Check.
-V4: Grounding-Floor (weak_overlap warning/score pressure) + Bildung↔IT bags.
+V4: Grounding-Floor (weak_overlap) + Bildung↔IT bags.
+V5: Claim-Based Interaction V4 + Argument Evolution in composite score.
 Offline lexical heuristics only — no provider calls.
 """
 from __future__ import annotations
@@ -9,11 +10,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from backend.simulation.claim_interaction import evaluate_claim_based_interactions
 from backend.simulation.social_dynamics import extract_local_comment_refs
 
-QUALITY_FIX = "8.4"
+QUALITY_FIX = "8.5"
 GROUNDED_ENGINE = "v4"
-INTERACTION_QUALITY_ENGINE = "v4"
+INTERACTION_QUALITY_ENGINE = "v5"
 
 # Overlap below this while still grounded → weak floor (Phase 8.4 / C6 class).
 GROUNDING_OVERLAP_FLOOR = 0.20
@@ -265,11 +267,9 @@ def score_reply_grounding(
         need = max(1, min(2, len(span_toks) // 2))
         if hit < need and not theme_ok:
             invented = True
-            # Keep a short readable missing theme.
             theme = " ".join(list(span_toks)[:4]) or span[:40]
             missing.append(theme)
 
-    # Strong thematic overlap OR no invented attribution with some overlap.
     grounded = (
         (not invented and (overlap >= 0.06 or thematic >= 0.34 or lexical >= 0.05))
         or overlap >= 0.18
@@ -282,7 +282,6 @@ def score_reply_grounding(
         score = max(0.0, score - 0.35)
     elif grounded:
         score = min(1.0, score + 0.15 + 0.1 * thematic)
-        # Phase 8.4 grounding floor: soft score pressure on fragile overlap.
         if weak_overlap:
             score = max(0.0, score - 0.08)
     score = round(max(0.0, min(1.0, score)), 4)
@@ -372,34 +371,44 @@ def build_interaction_quality(
     stance_clarity: float = 0.0,
     debate_quality_score: float = 0.0,
     opinion_stability: float = 0.0,
+    argument_evolution_score: float | None = None,
 ) -> dict[str, Any]:
-    """Composite Interaction Quality Evaluation for the Quality Dashboard V4."""
+    """Composite Interaction Quality Evaluation for the Quality Dashboard V5."""
     from backend.simulation.persona_motivation import motivation_coverage
 
     grounded = evaluate_argument_grounded_interactions(comments=comments)
+    claims = evaluate_claim_based_interactions(comments=comments)
     mot = motivation_coverage(agents or [])
     g_rate = float(grounded.get("grounded_reply_rate") or 0.0)
     g_score = float(grounded.get("mean_grounding_score") or 0.0)
     invent = float(grounded.get("invented_attribution_rate") or 0.0)
     weak = float(grounded.get("weak_overlap_rate") or 0.0)
+    claim_rate = float(claims.get("claim_address_rate") or 0.0)
+    claim_cov = float(claims.get("mean_claim_coverage") or 0.0)
     mot_cov = float(mot.get("coverage") or 0.0)
+    stake_cov = float(mot.get("stake_coverage") or 0.0)
     clarity = max(0.0, min(1.0, float(stance_clarity or 0.0)))
     debate = max(0.0, min(1.0, float(debate_quality_score or 0.0)))
     stability = max(0.0, min(1.0, float(opinion_stability or 0.0)))
+    evo = max(0.0, min(1.0, float(argument_evolution_score or 0.0)))
 
     composite = round(
         max(
             0.0,
             min(
                 1.0,
-                0.28 * g_rate
-                + 0.18 * g_score
-                + 0.16 * clarity
-                + 0.14 * debate
-                + 0.12 * mot_cov
-                + 0.08 * stability
-                - 0.20 * invent
-                - 0.06 * weak,
+                0.20 * g_rate
+                + 0.12 * g_score
+                + 0.14 * claim_rate
+                + 0.06 * claim_cov
+                + 0.12 * clarity
+                + 0.10 * debate
+                + 0.08 * mot_cov
+                + 0.04 * stake_cov
+                + 0.06 * evo
+                + 0.06 * stability
+                - 0.18 * invent
+                - 0.05 * weak,
             ),
         ),
         4,
@@ -414,17 +423,22 @@ def build_interaction_quality(
             "mean_grounding_score": g_score,
             "invented_attribution_rate": invent,
             "weak_overlap_rate": weak,
+            "claim_address_rate": claim_rate,
+            "mean_claim_coverage": claim_cov,
             "stance_clarity": round(clarity, 4),
             "debate_quality_score": round(debate, 4),
             "persona_motivation_coverage": mot_cov,
+            "stakeholder_stake_coverage": stake_cov,
+            "argument_evolution_score": round(evo, 4),
             "opinion_stability": round(stability, 4),
         },
         "argument_grounded": grounded,
+        "claim_based_interaction": claims,
         "persona_motivation": mot,
         "ok": composite >= 0.45 and invent <= 0.5 and clarity >= 0.5,
         "note": (
-            "Interaction Quality Evaluation (Phase 8.4): Antwortbezug, "
-            "Grounding-Floor, Persona-Motivation, Stance-Klarheit und Debate "
-            "Quality — offline."
+            "Interaction Quality Evaluation V5 (Phase 8.5): Antwortbezug, "
+            "Claim-Adressierung, Stakeholder-Motivation, Argument Evolution, "
+            "Stance-Klarheit und Debate Quality — offline."
         ),
     }

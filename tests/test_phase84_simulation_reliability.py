@@ -120,7 +120,7 @@ def test_ceilings_unchanged_phase84():
     assert cfg.max_tokens_per_run == 20000
     assert cfg.max_tokens_per_call == 500
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] == "8.4"
+    assert payload["society_intelligence"]["quality_fix"] in {"8.4", "8.5"}
     assert payload["society_intelligence"]["stance_classification_v4"] is True
     assert payload["society_intelligence"]["opinion_dynamics_v4"] is True
     assert payload["society_intelligence"]["argument_grounded_interaction_v4"] is True
@@ -145,7 +145,7 @@ def test_scenario_a_e251_stance_v4_fixes_false_pro(fixture_e251: dict):
     )
     payload = tracker.positions_payload()
     assert payload["stance_classifier"] == "v4"
-    assert payload["quality_fix"] == "8.4"
+    assert payload["quality_fix"] in {"8.4", "8.5"}
     dist = payload["polarity_distribution"]
     assert dist.get("unknown", 0) == 0
     assert dist.get("pro", 0) == 0
@@ -179,7 +179,7 @@ def test_stance_v4_hard_labels_and_regressions():
 def test_grounding_v4_e251_and_floor(fixture_e251: dict):
     snap = evaluate_argument_grounded_interactions(comments=fixture_e251["comments"])
     assert snap["engine"] == "v4"
-    assert snap["quality_fix"] == "8.4"
+    assert snap["quality_fix"] in {"8.4", "8.5"}
     assert snap["reply_count"] == 3
     assert snap["grounded_reply_rate"] == 1.0
     assert snap["invented_attribution_count"] == 0
@@ -213,7 +213,7 @@ def test_grounding_adversarial_digitale_kluft():
         debate_quality_score=0.5,
         opinion_stability=0.8,
     )
-    assert iq["engine"] == "v4"
+    assert iq["engine"] in {"v4", "v5"}
     assert iq["ok"] is False or iq["components"]["invented_attribution_rate"] > 0
     if LIVE_D1FB.is_file():
         data = json.loads(LIVE_D1FB.read_text(encoding="utf-8"))
@@ -295,11 +295,11 @@ def test_offline_scenarios_b_e_reliability(results_dir: Path, key: str):
     assert float(plan.get("planned_cost_usd") or 0.0) == 0.0
     path = st.get("result_path")
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.4"
-    assert data["meta"]["persona_engine"] == "v4"
+    assert data["meta"]["quality_fix"] in {"8.4", "8.5"}
+    assert data["meta"]["persona_engine"] in {"v4", "v5"}
     assert data["agent_positions"]["stance_classifier"] == "v4"
     assert data["opinion_dynamics"]["engine"] == "v4"
-    assert data["interaction_quality"]["engine"] == "v4"
+    assert data["interaction_quality"]["engine"] in {"v4", "v5"}
     assert data["discussion"]["argument_grounded"]["engine"] == "v4"
     assert motivation_coverage(data["agents"])["coverage"] == 1.0
     dist = data["agent_positions"]["polarity_distribution"]
@@ -321,7 +321,7 @@ def test_offline_scenarios_b_e_reliability(results_dir: Path, key: str):
     sources = {(c.get("source") or "") for c in (data.get("model_calls") or [])}
     assert "llm_api" not in sources
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
-    assert data["simulation_intelligence"]["quality_fix"] == "8.4"
+    assert data["simulation_intelligence"]["quality_fix"] in {"8.4", "8.5"}
 
 
 @pytest.mark.parametrize("n", list(OFFLINE_SCALE_PRESETS))
@@ -349,10 +349,10 @@ def test_scripted_scale_10_25_50_reliability(results_dir: Path, n: int):
     assert (st.get("cost_plan") or {}).get("paid_llm_unlocked") is False
     assert float((st.get("cost_plan") or {}).get("planned_cost_usd") or 0.0) == 0.0
     data = json.loads(Path(st["result_path"]).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.4"
+    assert data["meta"]["quality_fix"] in {"8.4", "8.5"}
     assert data["agent_positions"]["stance_classifier"] == "v4"
     assert data["opinion_dynamics"]["engine"] == "v4"
-    assert data["interaction_quality"]["engine"] == "v4"
+    assert data["interaction_quality"]["engine"] in {"v4", "v5"}
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
     assert data["simulation_intelligence"]["kpis"]["planned_cost_usd"] == 0.0
     assert all((a.get("motivation") or {}).get("values") for a in data["agents"])
@@ -382,7 +382,7 @@ def test_manual_n12_zero_cost_phase84(results_dir: Path):
     assert int(cost.get("api_calls") or 0) == 0
     assert float(cost.get("estimated_cost_usd") or 0.0) == 0.0
     data = json.loads(Path(st["result_path"]).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.4"
+    assert data["meta"]["quality_fix"] in {"8.4", "8.5"}
     assert data["opinion_dynamics"]["engine"] == "v4"
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
 
