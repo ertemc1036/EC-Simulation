@@ -4,7 +4,8 @@ Built offline from simulation state (agents + posts + comments + reactions).
 No external graph DB — dashboard-ready JSON only.
 
 Phase 5 social relations (only when evidenced):
-- ``agrees_with`` / ``disagrees_with`` — like_* / dislike_*
+- ``agrees_with`` / ``disagrees_with`` — like_* / dislike_* and
+  textual markers on resolvable ``→Kommentar#`` refs (Phase 5.2)
 - ``responds_to`` — create_comment on post + local Kommentar# refs
   (OASIS has no parent_comment_id)
 - ``influenced_by`` / ``position_changed`` — from PositionTracker changes
@@ -20,6 +21,7 @@ from backend.simulation.agent_generator import extract_scenario_keywords
 from backend.simulation.social_dynamics import (
     SOCIAL_RELATIONS,
     collect_local_responds_to,
+    collect_textual_agree_disagree,
 )
 
 # Phase-5 social + legacy replied_to (create_comment → post) for dashboards.
@@ -242,6 +244,19 @@ class LocalKnowledgeGraph:
                 **(spec.get("meta") or {}),
             )
 
+        # Phase 5.2: textual agrees/disagrees only with comment-ref evidence.
+        for spec in collect_textual_agree_disagree(
+            comments,
+            comment_statement_ids=comment_statement,
+            agent_nodes=agent_nodes,
+        ):
+            self.add_edge(
+                spec["source"],
+                spec["target"],
+                spec["relation"],
+                **(spec.get("meta") or {}),
+            )
+
         for r in reactions:
             rtype = str(r.get("type") or "like").lower()
             uid = r.get("user_id")
@@ -414,7 +429,8 @@ class LocalKnowledgeGraph:
             "note": (
                 "Lokaler Wissensgraph (Akteure / Themen / Aussagen). "
                 "Phase-5 Social-Kanten agrees_with / disagrees_with / "
-                "responds_to / influenced_by / position_changed nur belegt. "
+                "responds_to / influenced_by / position_changed nur belegt "
+                "(Like/Dislike und/oder Textmarker + →Kommentar#). "
                 "OASIS: kein parent_comment_id — lokale Kommentar-Refs."
             ),
         }

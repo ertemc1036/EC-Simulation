@@ -1,4 +1,4 @@
-"""Phase 5 / 5.1 — Social Dynamics: persistent positions + local comment refs.
+"""Phase 5 / 5.1 / 5.2 — Social Dynamics: persistent positions + local refs.
 
 OASIS has no ``parent_comment_id``. Local references (``→Kommentar#N``,
 ``Kommentar#N``, ``comment_id=N`` in comment content) plus like/dislike
@@ -11,6 +11,12 @@ Phase 5.1 accuracy rules:
 - ``unknown`` / ``uncertain`` when polarity is unclear
 - ``influenced_by`` only after a real change + direct interaction evidence
 - No double-counting; comment-id → author mapping must resolve correctly
+
+Phase 5.2 (live-run 7f75d2e4):
+- Manual ``[Seed / …]`` posts do not establish stance
+- Policy polarity: Ausnahme vs. volles Verbot (``exception``) is stable
+- Lexicon avoids false pro/contra from Support-/Kompromiss-Substrings
+- Textual ``agrees_with`` / ``disagrees_with`` only with comment-ref evidence
 """
 from __future__ import annotations
 
@@ -34,36 +40,72 @@ _COMMENT_REF_RE = re.compile(
     r"(?:→\s*)?(?:Kommentar#|comment_id\s*=\s*)(\d+)",
     re.IGNORECASE,
 )
+_SEED_CONTENT_RE = re.compile(r"^\[Seed\s*/", re.IGNORECASE)
 
-# Lightweight polarity lexicon for offline stance keys (DE + a few EN stems).
+# Stable stance: demands exceptions / transition rules vs. a full ban.
+_EXCEPTION_MARKERS = (
+    "ausnahmeregel",
+    "ausnahmeregelungen",
+    "ausnahmen für",
+    "ausnahme für",
+    "klare ausnahmen",
+    "soziale abfederung",
+    "soziale abfederungen",
+    "abfederung",
+    "lieferfenster",
+    "übergangsfrist",
+    "uebergangsfrist",
+    "übergangsfristen",
+    "uebergangsfristen",
+    "mobilitätseingeschränkte",
+    "mobilitaetseingeschraenkte",
+    "anwohnerpark",
+)
+
+# Pro toward the ban / measure — avoid matching "Unterstützung" (aid).
 _PRO_MARKERS = (
     "dafür",
-    "unterstütz",
     "befürwort",
-    "sinnvoll",
-    "notwendig",
-    "ja zum",
-    "pro ",
-    "support",
-    "agree",
-    "förder",
-    "große chance",
+    "bin für das",
+    "bin für ein",
+    "ja zum verbot",
+    "pro verbot",
+    "sinnvolles verbot",
+    "support the ban",
+    "agree with the ban",
 )
+# Verb support for the ban; allows a short adverb between verb and object.
+_PRO_BAN_RE = re.compile(
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot|"
+    r"unterstütze(?:n|t)?\s+(?:\w+\s+){0,2}(?:die\s+)?maßnahme|"
+    r"befürworte?\s+(?:\w+\s+){0,2}(?:das\s+)?verbot",
+    re.IGNORECASE,
+)
+
+# Contra toward a full / blanket ban (not goal-instruction "widersprich X").
 _CONTRA_MARKERS = (
     "dagegen",
     "ablehn",
-    "widersprich",
-    "widerspreche",
+    "lehne das verbot ab",
+    "lehnen das verbot ab",
+    "lehne ab",
     "nein zum",
-    "gegen ",
-    "unsinn",
-    "schädlich",
-    "problematisch",
-    "oppose",
-    "disagree",
-    "protest",
+    "gegen das verbot",
+    "gegen ein verbot",
+    "pauschale verbote",
+    "pauschales verbot",
+    "pauschalen verboten",
+    "mit sorge",
+    "gefährden arbeitsplätze",
     "gefährdet",
+    "widerspreche",
+    "widersprechen",
+    "oppose",
+    "disagree with the ban",
+    "protest",
 )
+
+# Explicit mind-change language only (bare "Kompromiss" is too common).
 _SHIFT_MARKERS = (
     "umdenken",
     "revidier",
@@ -73,10 +115,11 @@ _SHIFT_MARKERS = (
     "umstimme",
     "überzeugt",
     "einlenk",
-    "kompromiss",
     "ändere meine position",
     "position nach dem",
+    "werde überzeugt",
 )
+
 _CONFIRM_MARKERS = (
     "bestätigt",
     "bestaetigt",
@@ -92,6 +135,7 @@ _CONFIRM_MARKERS = (
     "likewise",
     "agree with that",
 )
+
 _UNCERTAIN_MARKERS = (
     "unsicher",
     "unklar",
@@ -104,6 +148,61 @@ _UNCERTAIN_MARKERS = (
     "offen lassen",
     "noch offen",
 )
+
+# Mediating / balancing language (politics) without taking a ban side.
+_MEDIATING_MARKERS = (
+    "zielkonflikt",
+    "zielkonflikte",
+    "einerseits",
+    "andererseits",
+    "mehrheitsfähigkeit",
+    "berechtigten anliegen aller",
+    "anliegen aller gruppen",
+    "ohne eine seite komplett",
+)
+
+# Textual agreement / disagreement toward a referenced comment (Phase 5.2).
+_TEXT_AGREE_MARKERS = (
+    "stimme zu",
+    "stimme dir zu",
+    "stimme ihnen zu",
+    "einverstanden",
+    "sehr richtig",
+    "teile diese",
+    "teile deine",
+    "teile ihre",
+    "danke für ihren hinweis",
+    "danke für den hinweis",
+    "danke für ihren",
+    "danke für deinen",
+    "wir erkennen die",
+    "erkenne die berechtigten",
+    "genau das",
+    "unterschreibe",
+    "likewise",
+    "agree with",
+)
+
+_TEXT_DISAGREE_MARKERS = (
+    "widerspreche",
+    "widersprechen",
+    "sehe das anders",
+    "sehe ich anders",
+    "kann dem nicht zustimmen",
+    "stimme dem nicht zu",
+    "das stimmt so nicht",
+    "allerdings müssen wir",
+    "allerdings dürfen",
+    "allerdings darf",
+    "dürfen nicht über",
+    "darf nicht über",
+    "ohne alltagsbezug",
+    "disagree",
+    "oppose that",
+)
+
+# Clear stance polarities (exception = Ausnahme vs. volles Verbot).
+_CLEAR_POLARITIES = frozenset({"pro", "contra", "exception"})
 
 
 def extract_local_comment_refs(content: str) -> list[int]:
@@ -118,20 +217,41 @@ def extract_local_comment_refs(content: str) -> list[int]:
     return ids
 
 
+def _is_seed_content(text: str) -> bool:
+    """Manual Diskussionsimpuls seed is not a real agent stance statement."""
+    return bool(_SEED_CONTENT_RE.match((text or "").lstrip()))
+
+
 def _polarity(text: str) -> str:
-    """Coarse stance polarity including unknown/uncertain (Phase 5.1)."""
-    low = (text or "").lower()
+    """Coarse stance polarity including exception / unknown / uncertain."""
+    raw = text or ""
+    if _is_seed_content(raw):
+        return "unknown"
+    low = raw.lower()
     if any(m in low for m in _UNCERTAIN_MARKERS):
         return "uncertain"
+
     pro = sum(1 for m in _PRO_MARKERS if m in low)
+    if _PRO_BAN_RE.search(low):
+        pro += 1
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
-    if pro > contra:
+    exception = sum(1 for m in _EXCEPTION_MARKERS if m in low)
+    mediating = sum(1 for m in _MEDIATING_MARKERS if m in low)
+
+    # Ausnahme-/Übergangsforderungen are a stable stance vs. full ban —
+    # not a synthetic pro from "Unterstützung" / "notwendig".
+    if exception and pro == 0:
+        return "exception"
+    if pro > contra and pro > 0:
         return "pro"
-    if contra > pro:
+    if contra > pro and contra > 0:
         return "contra"
+    if exception:
+        return "exception"
+    if mediating and pro == 0 and contra == 0:
+        return "uncertain"
     if any(m in low for m in _SHIFT_MARKERS):
         return "shifting"
-    # No clear markers → unknown (not a synthetic 'neutral' that flips every edit).
     return "unknown"
 
 
@@ -143,6 +263,17 @@ def _is_confirmation(text: str) -> bool:
 def _is_explicit_shift(text: str) -> bool:
     low = (text or "").lower()
     return any(m in low for m in _SHIFT_MARKERS)
+
+
+def classify_textual_agree_disagree(content: str) -> list[str]:
+    """Evidenced textual agree/disagree labels (may be both, or empty)."""
+    low = (content or "").lower()
+    out: list[str] = []
+    if any(m in low for m in _TEXT_AGREE_MARKERS):
+        out.append("agrees_with")
+    if any(m in low for m in _TEXT_DISAGREE_MARKERS):
+        out.append("disagrees_with")
+    return out
 
 
 def _stance_key(polarity: str, snippet: str) -> str:
@@ -171,25 +302,21 @@ def _is_evidenced_change(
     if _is_confirmation(content) and not _is_explicit_shift(content):
         return False
     if prev_polarity == new_polarity:
-        # Same coarse polarity: only an explicit mind-change phrase counts,
-        # and only when polarity is not already a clear pro/contra lock.
         return False
-    # unknown/uncertain → first clear pro/contra after establishment is a
+    # unknown/uncertain → first clear stance after establishment is
     # clarification, not a Meinungswechsel, unless the text signals a shift.
-    if prev_polarity in {"unknown", "uncertain"} and new_polarity in {
-        "pro",
-        "contra",
-    }:
+    if prev_polarity in {"unknown", "uncertain"} and new_polarity in _CLEAR_POLARITIES:
         return _is_explicit_shift(content)
-    if new_polarity in {"unknown", "uncertain"} and prev_polarity in {
-        "pro",
-        "contra",
-    }:
-        # Softening to uncertainty counts only with explicit shift language.
+    if new_polarity in {"unknown", "uncertain"} and prev_polarity in _CLEAR_POLARITIES:
         return _is_explicit_shift(content)
-    # Clear flip pro ↔ contra.
+    # Clear flip among pro / contra / exception only when polarity differs
+    # and either it is a classic pro↔contra flip or shift language is present.
     if {prev_polarity, new_polarity} == {"pro", "contra"}:
         return True
+    if prev_polarity in _CLEAR_POLARITIES and new_polarity in _CLEAR_POLARITIES:
+        # exception ↔ pro/contra requires explicit mind-change language
+        # (exception restatements must not invent switches).
+        return _is_explicit_shift(content)
     # Entering/leaving "shifting" only with explicit mind-change language.
     if "shifting" in {prev_polarity, new_polarity}:
         return _is_explicit_shift(content)
@@ -274,13 +401,14 @@ class PositionTracker:
         """Recompute positions from latest content; record evidenced changes."""
         self.seed_from_goals(agents, step=step if step is not None else 0)
         # Latest statement per agent (comment preferred over older post).
+        # Manual [Seed / …] posts are ignored for stance establishment.
         latest: dict[int, tuple[str, str, str]] = {}
         for p in posts:
             uid = p.get("user_id")
             if uid is None:
                 continue
             content = str(p.get("content") or "").strip()
-            if not content:
+            if not content or _is_seed_content(content):
                 continue
             latest[int(uid)] = (content, "post", f"post:{p.get('post_id')}")
         for c in comments:
@@ -351,7 +479,7 @@ class PositionTracker:
             influencers: list[int] = []
 
             if first_platform:
-                # Erstposition: goal → first post/comment is establishment, not change.
+                # Erstposition: goal → first real post/comment is establishment.
                 changed = False
             elif prev is not None:
                 changed = _is_evidenced_change(
@@ -364,9 +492,20 @@ class PositionTracker:
                 if not changed and _is_confirmation(content) and prev.polarity in {
                     "pro",
                     "contra",
+                    "exception",
                     "uncertain",
                     "unknown",
                 }:
+                    pol = prev.polarity
+                    key = _stance_key(pol, stance)
+                # Same-side Ausnahme restatement: keep exception polarity even
+                # when a later comment is marker-sparse (avoid unknown drift).
+                if (
+                    not changed
+                    and prev.polarity == "exception"
+                    and pol in {"unknown", "uncertain"}
+                    and not _is_explicit_shift(content)
+                ):
                     pol = prev.polarity
                     key = _stance_key(pol, stance)
 
@@ -427,8 +566,9 @@ class PositionTracker:
             "changes": list(self._change_events),
             "note": (
                 "Persistente Agentenpositionen aus Goal-Seed + Posts/Kommentaren. "
-                "Erstposition ≠ Wechsel; position_changed / influenced_by nur bei "
-                "belegtem Stance-Wechsel (Bestätigung zählt nicht)."
+                "Seed-Impulse und Erstposition ≠ Wechsel; position_changed / "
+                "influenced_by nur bei belegtem Stance-Wechsel "
+                "(Bestätigung / Ausnahme-Restatement zählen nicht)."
             ),
         }
 
@@ -519,4 +659,52 @@ def collect_local_responds_to(
                     },
                 }
             )
+    return specs
+
+
+def collect_textual_agree_disagree(
+    comments: list[dict[str, Any]],
+    *,
+    comment_statement_ids: dict[int, str],
+    agent_nodes: dict[int, str],
+) -> list[dict[str, Any]]:
+    """agrees_with / disagrees_with from comment text + resolvable →Kommentar#.
+
+    Only emits when both (1) a local comment ref resolves and (2) clear
+    agree/disagree markers appear in the same comment. No invention from
+    bare replies or marker-free acknowledgements.
+    """
+    specs: list[dict[str, Any]] = []
+    for c in comments:
+        cid = c.get("comment_id")
+        uid = c.get("user_id")
+        if cid is None or uid is None:
+            continue
+        aid = int(uid)
+        if aid not in agent_nodes:
+            continue
+        content = str(c.get("content") or "")
+        refs = extract_local_comment_refs(content)
+        if not refs:
+            continue
+        labels = classify_textual_agree_disagree(content)
+        if not labels:
+            continue
+        for ref in refs:
+            if ref not in comment_statement_ids:
+                continue
+            for relation in labels:
+                specs.append(
+                    {
+                        "relation": relation,
+                        "source": agent_nodes[aid],
+                        "target": comment_statement_ids[ref],
+                        "meta": {
+                            "comment_id": cid,
+                            "target_comment_id": ref,
+                            "evidence": "textual_comment_ref",
+                            "markers": labels,
+                        },
+                    }
+                )
     return specs

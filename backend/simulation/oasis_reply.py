@@ -34,7 +34,9 @@ OASIS_REPLY_API: dict[str, Any] = {
         "post_id (flat thread under the post). Nested comment→comment replies "
         "are not supported — use local text refs →Kommentar#N in content. "
         "Agreement / disagreement = LIKE_POST / DISLIKE_POST "
-        "or LIKE_COMMENT / DISLIKE_COMMENT on the observed id — no quotas. "
+        "or LIKE_COMMENT / DISLIKE_COMMENT on the observed id — no quotas; "
+        "additionally, clear textual agree/disagree markers in a comment that "
+        "already contains a resolvable →Kommentar# ref (Phase 5.2). "
         "Round 2+: prefer like_comment/dislike_comment on visible Kommentar# IDs."
     ),
     "local_comment_ref_convention": "→Kommentar#<id> inside create_comment content",
