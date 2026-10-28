@@ -12,6 +12,9 @@ scales to offline 10/25/50 society runs.
 
 Phase 7: Multi-round opinion scenarios (bis 4 Runden) — establish → react →
 shift → consolidate, with polarity markers for evidenced Meinungsdynamik.
+
+Phase 8.1: Prefer pending wave plans from ``plan_round`` via ``take_plan``
+so Scheduler V3 waves are consumed in execution (not only unit-tested).
 """
 from __future__ import annotations
 
@@ -188,14 +191,17 @@ class ScriptedReactiveModel(BaseModelBackend):
 
         posts = _posts_from_ids(ids, user_ids or agent_pool)
         comments = _comments_from_ids(comment_ids, user_ids or agent_pool)
-        plan = self._scheduler.plan(
-            agent_id=self.agent_id,
-            round_n=round_n,
-            agent_ids=agent_pool,
-            posts=posts,
-            comments=comments,
-            call_index=n,
-        )
+        # Phase 8.1: consume wave plan from plan_round when present.
+        plan = self._scheduler.take_plan(self.agent_id, round_n)
+        if plan is None:
+            plan = self._scheduler.plan(
+                agent_id=self.agent_id,
+                round_n=round_n,
+                agent_ids=agent_pool,
+                posts=posts,
+                comments=comments,
+                call_index=n,
+            )
 
         # Never treat self as inter-agent partner evidence in content.
         assert plan.partner_agent_id is None or plan.partner_agent_id != self.agent_id

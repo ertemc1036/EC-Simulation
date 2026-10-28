@@ -43,6 +43,7 @@ from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
 from backend.simulation.cost_token_planner import plan_run
 from backend.simulation.discussion_engine import DiscussionEngine
+from backend.simulation.interaction_engine import MultiAgentInteractionEngine
 from backend.simulation.knowledge_graph import LocalKnowledgeGraph
 from backend.simulation.local_memory import LocalAgentMemory
 from backend.simulation.manual_script import build_manual_rounds
@@ -255,6 +256,7 @@ class SimulationState:
     interaction_summary: dict[str, Any] = field(default_factory=dict)
     oasis_reply: dict[str, Any] = field(default_factory=dict)
     scheduler: dict[str, Any] = field(default_factory=dict)
+    interaction_engine: dict[str, Any] = field(default_factory=dict)
     society_overview: dict[str, Any] = field(default_factory=dict)
     discussion: dict[str, Any] = field(default_factory=dict)
     cost_plan: dict[str, Any] = field(default_factory=dict)
@@ -298,6 +300,7 @@ class SimulationState:
             "interaction_summary": self.interaction_summary,
             "oasis_reply": self.oasis_reply,
             "scheduler": self.scheduler,
+            "interaction_engine": self.interaction_engine,
             "society_overview": self.society_overview,
             "discussion": self.discussion,
             "cost_plan": self.cost_plan,
@@ -345,6 +348,7 @@ class SimulationEngine:
         self._relationships = RelationshipDynamics()
         self._opinion = OpinionDynamics()
         self._scheduler = SocialInteractionScheduler()
+        self._interaction = MultiAgentInteractionEngine(self._scheduler)
         self._discussion = DiscussionEngine()
         self._run_language: str = "de"
         self._run_scenario: str = ""
@@ -655,6 +659,9 @@ class SimulationEngine:
             self._relationships = RelationshipDynamics()
             self._opinion = OpinionDynamics()
             self._scheduler = SocialInteractionScheduler(scenario=scenario.strip())
+            self._interaction = MultiAgentInteractionEngine(
+                self._scheduler, scenario=scenario.strip()
+            )
             self._discussion = DiscussionEngine()
             ScriptedReactiveModel.shared_scheduler = self._scheduler
             ScriptedReactiveModel.shared_scenario = scenario.strip()
@@ -675,6 +682,8 @@ class SimulationEngine:
                 "live_llm_max_agents": LIVE_TEST_MAX_AGENTS,
                 "offline_max_agents": OFFLINE_MAX_AGENTS,
                 "paid_llm_unlocked_for_scale": False,
+                "persona_engine": "v3",
+                "quality_fix": "8.1",
             }
             self.state = SimulationState(
                 run_id=run_id,
@@ -698,6 +707,7 @@ class SimulationEngine:
                 interaction_summary=_empty_interaction_summary(),
                 oasis_reply=reply_meta,
                 scheduler=self._scheduler.summary(),
+                interaction_engine=self._interaction.summary(),
                 society_overview=overview,
                 discussion=self._discussion.snapshot(),
                 db_path=str(db_path),
@@ -1137,45 +1147,77 @@ class SimulationEngine:
             graph.add_agent(agent)
         return graph
 
+    def _interaction_path(self) -> str:
+        if self._is_offline_scripted():
+            return "scripted"
+        if self._execution_kind == "live_llm":
+            return "live_llm"
+        return "manual"
+
     async def _run_manual(
         self, env, scenario: str, max_steps: int, db_path: Path
     ) -> None:
         rounds = build_manual_rounds(
             scenario, agents=self._run_agents, max_steps=max_steps
         )
+        path = "manual"
         for idx, round_map in enumerate(rounds):
-            actions: dict[SocialAgent, list[ManualAction]] = {}
-            for agent_id, acts in round_map.items():
-                if agent_id not in self._agent_profiles:
-                    continue
-                agent = env.agent_graph.get_agent(agent_id)
-                actions[agent] = acts
-                profile = self._agent_profiles.get(agent_id)
-                for act in acts:
-                    entry = {
-                        "step": idx + 1,
-                        "agent_id": agent_id,
-                        "action_type": act.action_type.value,
-                        "action_args": act.action_args,
-                        "source": "ManualAction",
-                        "kind": "simulated_platform_action",
-                        "goal": profile.goal if profile else None,
-                        "language": self._run_language,
-                        "ts": _utc_now(),
-                    }
-                    self._append_action_log(entry)
-                    self._local_memory.ingest_action(
-                        agent_id=agent_id,
-                        action_type=act.action_type.value,
-                        action_args=act.action_args,
-                        step=idx + 1,
-                        goal=profile.goal if profile else None,
+            round_n = idx + 1
+            agent_ids = sorted(
+                aid for aid in round_map.keys() if aid in self._agent_profiles
+            )
+            # Phase 8.1: plan_round before ManualAction waves (coverage metrics).
+            self._interaction.prepare_round(
+                round_n=round_n,
+                agent_ids=agent_ids,
+                posts=list(self.state.posts or []),
+                comments=list(self.state.comments or []),
+                path=path,
+            )
+            wave_groups = self._scheduler.wave_slices(agent_ids)
+            for wave_idx, wave_ids in enumerate(wave_groups):
+                actions: dict[SocialAgent, list[ManualAction]] = {}
+                for agent_id in wave_ids:
+                    acts = round_map.get(agent_id) or []
+                    if not acts:
+                        continue
+                    agent = env.agent_graph.get_agent(agent_id)
+                    actions[agent] = acts
+                    profile = self._agent_profiles.get(agent_id)
+                    for act in acts:
+                        entry = {
+                            "step": round_n,
+                            "agent_id": agent_id,
+                            "action_type": act.action_type.value,
+                            "action_args": act.action_args,
+                            "source": "ManualAction",
+                            "kind": "simulated_platform_action",
+                            "goal": profile.goal if profile else None,
+                            "language": self._run_language,
+                            "wave": wave_idx,
+                            "ts": _utc_now(),
+                        }
+                        self._append_action_log(entry)
+                        self._local_memory.ingest_action(
+                            agent_id=agent_id,
+                            action_type=act.action_type.value,
+                            action_args=act.action_args,
+                            step=round_n,
+                            goal=profile.goal if profile else None,
+                        )
+                if actions:
+                    await env.step(actions)
+                    self._interaction.mark_wave(
+                        round_n=round_n,
+                        wave=wave_idx,
+                        agent_ids=wave_ids,
+                        path=path,
                     )
-            await env.step(actions)
+                    self._refresh_from_db(db_path)
             with self._lock:
-                self.state.step = idx + 1
+                self.state.step = round_n
             self._refresh_from_db(db_path)
-            self._emit("step", {"step": idx + 1})
+            self._emit("step", {"step": round_n})
 
     async def _run_llm(
         self, env, scenario: str, max_steps: int, db_path: Path, language: str
@@ -1216,6 +1258,7 @@ class SimulationEngine:
         self._refresh_from_db(db_path)
         self._emit("step", {"step": 0})
 
+        path = self._interaction_path()
         for step in range(1, max_steps + 1):
             assert self._tracker is not None
             remaining = self._tracker.remaining_calls()
@@ -1237,44 +1280,86 @@ class SimulationEngine:
             agents = [
                 a for _, a in env.agent_graph.get_agents()
             ][: min(remaining, len(self._run_agents), agent_slice_cap)]
-            actions = {agent: LLMAction() for agent in agents}
-            for agent in agents:
-                profile = self._agent_profiles.get(agent.social_agent_id)
-                self._append_action_log(
-                    {
-                        "step": step,
-                        "agent_id": agent.social_agent_id,
-                        "action_type": "LLMAction",
-                        "action_args": {
-                            "scenario": scenario,
+            agent_ids = [int(a.social_agent_id) for a in agents]
+
+            # Phase 8.1: plan_round before wave execution (Scheduler V3 in execution).
+            self._interaction.prepare_round(
+                round_n=step,
+                agent_ids=agent_ids,
+                posts=list(self.state.posts or []),
+                comments=list(self.state.comments or []),
+                path=path,
+            )
+
+            wave_groups = self._interaction.wave_agent_groups(agents)
+            aborted = False
+            for wave_idx, wave_agents in enumerate(wave_groups):
+                if self._tracker.remaining_calls() <= 0 or self._tracker.limit_hit:
+                    self._limit_stop = True
+                    break
+                # Respect remaining call budget per wave.
+                rem = self._tracker.remaining_calls()
+                if rem < len(wave_agents):
+                    wave_agents = wave_agents[: max(0, rem)]
+                if not wave_agents:
+                    break
+                actions = {agent: LLMAction() for agent in wave_agents}
+                wave_ids = [int(a.social_agent_id) for a in wave_agents]
+                for agent in wave_agents:
+                    profile = self._agent_profiles.get(agent.social_agent_id)
+                    self._append_action_log(
+                        {
+                            "step": step,
+                            "agent_id": agent.social_agent_id,
+                            "action_type": "LLMAction",
+                            "action_args": {
+                                "scenario": scenario,
+                                "goal": profile.goal if profile else None,
+                                "language": language,
+                                "wave": wave_idx,
+                            },
+                            "source": "LLMAction",
+                            "kind": "llm_decision_request",
                             "goal": profile.goal if profile else None,
                             "language": language,
-                        },
-                        "source": "LLMAction",
-                        "kind": "llm_decision_request",
-                        "goal": profile.goal if profile else None,
-                        "language": language,
-                        "ts": _utc_now(),
-                    }
-                )
-            try:
-                await env.step(actions)
-            except LimitExceeded as exc:
-                self._limit_stop = True
-                with self._lock:
-                    self.state.message = str(exc)
-                    self.state.stop_reason = str(exc)
-                self._sync_cost_to_state()
-                break
-            except Exception as exc:
-                # Soft-fail a round: record and stop rather than crash unpaid tests.
-                self._failed = True
-                with self._lock:
-                    self.state.message = f"LLM-Runde abgebrochen: {exc}"
-                    self.state.error = str(exc)
-                    self.state.stop_reason = "llm_round_error"
-                self._sync_cost_to_state()
+                            "wave": wave_idx,
+                            "ts": _utc_now(),
+                        }
+                    )
+                try:
+                    await env.step(actions)
+                    self._interaction.mark_wave(
+                        round_n=step,
+                        wave=wave_idx,
+                        agent_ids=wave_ids,
+                        path=path,
+                    )
+                except LimitExceeded as exc:
+                    self._limit_stop = True
+                    with self._lock:
+                        self.state.message = str(exc)
+                        self.state.stop_reason = str(exc)
+                    self._sync_cost_to_state()
+                    aborted = True
+                    break
+                except Exception as exc:
+                    # Soft-fail a round: record and stop rather than crash unpaid tests.
+                    self._failed = True
+                    with self._lock:
+                        self.state.message = f"LLM-Runde abgebrochen: {exc}"
+                        self.state.error = str(exc)
+                        self.state.stop_reason = "llm_round_error"
+                    self._sync_cost_to_state()
+                    self._refresh_from_db(db_path, merge_llm_traces=True, step=step)
+                    aborted = True
+                    break
+
+                # Later waves see earlier wave content (controlled multi-agent scaling).
                 self._refresh_from_db(db_path, merge_llm_traces=True, step=step)
+
+            if aborted and self._failed:
+                break
+            if aborted and self._limit_stop:
                 break
 
             with self._lock:
@@ -1564,6 +1649,7 @@ class SimulationEngine:
         }
         self.state.oasis_reply = oasis_reply_status()
         self.state.scheduler = self._scheduler.summary()
+        self.state.interaction_engine = self._interaction.summary()
         pol = positions_payload.get("polarity_distribution") or {}
         social = (self.state.knowledge_graph or {}).get("social_relations") or {}
         self.state.society_analytics = build_society_analytics(
@@ -1608,6 +1694,7 @@ class SimulationEngine:
             society_analytics=self.state.society_analytics,
             discussion=self.state.discussion,
             agent_positions=positions_payload,
+            interaction_engine=self.state.interaction_engine,
         )
         self.state.society_overview = {
             "agent_count": len(self._run_agents),
@@ -1626,6 +1713,9 @@ class SimulationEngine:
             "paid_llm_unlocked_for_scale": False,
             "scheduler_plans": (self.state.scheduler or {}).get("plans", 0),
             "scheduler_waves": (self.state.scheduler or {}).get("waves", 0),
+            "scheduler_waves_executed": (self.state.scheduler or {}).get(
+                "waves_executed", 0
+            ),
             "self_as_partner_count": (self.state.scheduler or {}).get(
                 "self_as_partner_count", 0
             ),
@@ -1637,11 +1727,13 @@ class SimulationEngine:
                 "rounds_tracked", 0
             ),
             "analytics_kpis": (self.state.society_analytics or {}).get("kpis") or {},
-            "persona_engine": "v2",
-            "quality_fix": "8.0",
+            "persona_engine": "v3",
+            "quality_fix": "8.1",
             "planned_cost_usd": cost_plan.planned_cost_usd,
+            "planned_waves": cost_plan.planned_waves,
             "intelligence_kpis": (self.state.simulation_intelligence or {}).get("kpis")
             or {},
+            "interaction_engine": (self.state.interaction_engine or {}).get("backend"),
         }
 
     def _persist_results(
@@ -1680,8 +1772,8 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 8,
-                "quality_fix": "8.0",
-                "persona_engine": "v2",
+                "quality_fix": "8.1",
+                "persona_engine": "v3",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
                 "agent_count": agents_n,
@@ -1749,8 +1841,8 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "8.0",
-                    "persona_engine": "v2",
+                    "quality_fix": "8.1",
+                    "persona_engine": "v3",
                     "topic_aware_personas": True,
                     "individual_personas": True,
                     "synthetic_offline_content": True,
@@ -1760,6 +1852,8 @@ class SimulationEngine:
                     "argument_history_bounded": True,
                     "cost_token_planner": True,
                     "simulation_intelligence": True,
+                    "multi_agent_interaction_engine": True,
+                    "scheduler_waves_in_execution": True,
                 },
             },
             "agents": self.state.agents,
@@ -1781,6 +1875,7 @@ class SimulationEngine:
             "interaction_summary": self.state.interaction_summary,
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),
             "scheduler": self.state.scheduler,
+            "interaction_engine": self.state.interaction_engine,
             "society_overview": self.state.society_overview,
             "discussion": self.state.discussion,
             "db_path": str(db_path),

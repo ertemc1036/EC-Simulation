@@ -179,20 +179,38 @@ export interface SocietyOverview {
   persona_engine?: string
   quality_fix?: string
   planned_cost_usd?: number
+  planned_waves?: number
+  scheduler_waves_executed?: number
+  interaction_engine?: string
   intelligence_kpis?: Record<string, number>
 }
 
 export interface SchedulerSnapshot {
   backend?: string
+  version?: number
   scalable?: boolean
   wave_size?: number
   waves?: number
+  waves_planned?: number
+  waves_executed?: number
   plans?: number
   unique_pairs?: number
   agent_coverage?: number
   self_as_partner_count?: number
   self_reference_blocked?: boolean
+  execution_paths_used?: string[]
   recent?: Array<Record<string, unknown>>
+  note?: string
+}
+
+export interface InteractionEngineSnapshot {
+  backend?: string
+  quality_fix?: string
+  version?: number
+  path?: string
+  rounds_prepared?: number
+  waves_planned?: number
+  waves_executed?: number
   note?: string
 }
 
@@ -301,6 +319,10 @@ export interface CostTokenPlan {
   within_live_ceilings?: boolean
   live_clamp_applied?: boolean
   paid_llm_unlocked?: boolean
+  wave_size?: number
+  planned_waves?: number
+  calls_per_wave?: number
+  planner_version?: number
   note?: string
 }
 
@@ -310,13 +332,17 @@ export interface SimulationIntelligence {
   persona_engine?: string
   paid_llm_unlocked?: boolean
   persona?: {
+    engine?: string
     diversity_score?: number
     issue_count?: number
     unique_role_labels?: number
     unique_occupations?: number
+    unique_names?: number
+    role_balance?: number
     ok?: boolean
   }
   scheduler?: Record<string, unknown>
+  interaction_engine?: Record<string, unknown>
   cost_plan?: CostTokenPlan
   kpis?: Record<string, number>
   scale?: Record<string, unknown>
@@ -356,6 +382,7 @@ export interface SimulationState {
   interaction_summary?: InteractionSummary
   oasis_reply?: OasisReplyInfo
   scheduler?: SchedulerSnapshot
+  interaction_engine?: InteractionEngineSnapshot
   society_overview?: SocietyOverview
   discussion?: DiscussionSnapshot
   error: string | null

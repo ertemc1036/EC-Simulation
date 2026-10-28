@@ -1,4 +1,4 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 8.0."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 8.1."""
 from __future__ import annotations
 
 import hashlib
@@ -24,6 +24,7 @@ from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
 from backend.simulation.cost_token_planner import planner_status_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
+from backend.simulation.interaction_engine import interaction_status_payload  # noqa: E402
 
 # Fingerprint of key Phase-8 modules — dashboard can detect a stale :5001 process.
 _PHASE8_MARKERS = (
@@ -43,6 +44,7 @@ _PHASE8_MARKERS = (
     ROOT / "backend" / "simulation" / "discussion_engine.py",
     ROOT / "backend" / "simulation" / "cost_token_planner.py",
     ROOT / "backend" / "simulation" / "simulation_intelligence.py",
+    ROOT / "backend" / "simulation" / "interaction_engine.py",
     ROOT / "backend" / "simulation" / "prompts.py",
 )
 
@@ -111,13 +113,15 @@ def health():
             },
             "config": cfg,
             "cost_token_planner": planner,
+            "interaction_engine": interaction_status_payload(),
             "runtime": {
                 "phase": cfg.get("phase") or EXPECTED_PHASE,
                 "code_revision": CODE_REVISION,
                 "expects_phase": EXPECTED_PHASE,
                 "port": settings.flask_port,
-                "persona_engine": "v2",
-                "quality_fix": "8.0",
+                "persona_engine": "v3",
+                "quality_fix": "8.1",
+                "scheduler_version": 3,
             },
             "zep": engine.zep.status,
         }
