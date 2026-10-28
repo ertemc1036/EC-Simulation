@@ -192,6 +192,31 @@ const relationshipBonds = computed(() => {
   return Array.isArray(bonds) ? bonds.slice(0, 24) : []
 })
 
+const discussionThreads = computed(() => {
+  const threads = sim.value?.discussion?.threads
+  return Array.isArray(threads) ? threads.slice(-24) : []
+})
+
+const discussionArgs = computed(() => {
+  const args = sim.value?.discussion?.arguments
+  return Array.isArray(args) ? args.slice(-12) : []
+})
+
+const modeStrip = computed(() => {
+  const kind = sim.value?.execution_kind || (mode.value === 'llm' ? 'llm' : 'manual')
+  const debug = Boolean(sim.value?.discussion || sim.value?.society_analytics)
+  if (kind === 'live_llm') {
+    return { label: 'Live-LLM', tone: 'live' as const, hint: 'kostenpflichtig · Freigabe nötig' }
+  }
+  if (kind === 'scripted') {
+    return { label: 'Offline / Scripted', tone: 'offline' as const, hint: 'keine Provider-Calls' }
+  }
+  if (kind === 'manual' || mode.value === 'manual') {
+    return { label: 'Offline / Manual', tone: 'offline' as const, hint: debug ? 'Debug-Ansichten aktiv' : 'StubModel' }
+  }
+  return { label: 'LLM (Gate)', tone: 'gate' as const, hint: 'Start nur nach Freigabe' }
+})
+
 const longTermMemoryAgents = computed(() => {
   const lt = sim.value?.agent_memory?.long_term
   if (!lt || typeof lt !== 'object') return []
@@ -668,14 +693,21 @@ onUnmounted(() => {
 
     <section class="grid">
       <div>
-        <h2>Profile</h2>
+        <h2>Agentenkarten</h2>
         <p class="lede-sm">
-          {{ displayAgents.length }} Agenten ·
-          {{ sim?.agent_generation || agentGeneration }}
+          {{ displayAgents.length }} Personen ·
+          {{ sim?.agent_generation || agentGeneration }} ·
+          <span class="mode-pill" :class="'tone-' + modeStrip.tone">{{ modeStrip.label }}</span>
+          <span class="meta"> {{ modeStrip.hint }}</span>
         </p>
         <ul class="agents">
           <li v-for="a in displayAgents" :key="a.agent_id">
             <span class="name">{{ a.name }}</span>
+            <span class="desc" v-if="a.age || a.occupation || a.role_label">
+              <span v-if="a.age">{{ a.age }} J.</span>
+              <span v-if="a.occupation"> · {{ a.occupation }}</span>
+              <span v-if="a.role_label"> · {{ a.role_label }}</span>
+            </span>
             <span class="desc">{{ a.description }}</span>
             <span class="goal">Ziel: {{ a.goal }}</span>
             <span class="desc">Stil: {{ a.style }}</span>
@@ -693,7 +725,7 @@ onUnmounted(() => {
         </ul>
         <p v-else class="empty">Noch keine Posts.</p>
 
-        <h2>Kommentare & Reaktionen</h2>
+        <h2>Kommentare & Reply-Threads</h2>
         <ul class="feed compact" v-if="sim && (sim.comments.length || sim.reactions.length)">
           <li v-for="c in sim.comments" :key="'c' + c.comment_id">
             <span class="meta">Kommentar/Reply #{{ c.comment_id }} → Post {{ c.post_id }} · user {{ c.user_id }}</span>
@@ -708,6 +740,26 @@ onUnmounted(() => {
           </li>
         </ul>
         <p v-else class="empty">Noch keine Reaktionen.</p>
+        <div v-if="discussionThreads.length" class="thread-panel">
+          <h3>Thread-Rekonstruktion</h3>
+          <p class="lede-sm">
+            Lokal aus →Kommentar# · OASIS parent_comment_id=
+            {{ sim?.discussion?.parent_comment_id_supported === false ? 'nein' : '—' }}
+          </p>
+          <ol class="log">
+            <li v-for="t in discussionThreads" :key="'th' + t.comment_id">
+              <span class="mono">#{{ t.comment_id }}</span>
+              · Autor {{ t.author_id ?? '—' }}
+              <span v-if="t.parent_comment_id != null">
+                · Parent #{{ t.parent_comment_id }}
+                → Empfänger {{ t.recipient_id ?? '—' }}
+              </span>
+              <span v-if="t.round_n != null"> · R{{ t.round_n }}</span>
+              <span v-if="t.self_reply" class="badge src-fail">self</span>
+              <span class="src"> · {{ t.snippet }}</span>
+            </li>
+          </ol>
+        </div>
       </div>
 
       <div>
@@ -864,10 +916,11 @@ onUnmounted(() => {
         <p v-else class="empty">Noch keine Memory-Einträge.</p>
       </div>
       <div>
-        <h2>Positionen</h2>
+        <h2>Positionsverlauf</h2>
         <p class="lede-sm" v-if="positionSummary">
           {{ positionSummary.count }} Agenten ·
-          {{ positionSummary.changes }} Positionswechsel (belegt)
+          {{ positionSummary.changes }} Positionswechsel (belegt) ·
+          Labels: pro / contra / conditional / uncertain / unknown
         </p>
         <ul class="feed compact" v-if="positionSummary?.positions?.length">
           <li v-for="p in positionSummary.positions" :key="'pos' + p.agent_id">
@@ -877,12 +930,30 @@ onUnmounted(() => {
               <span v-if="p.influenced_by_agent_ids?.length">
                 · beeinflusst von {{ p.influenced_by_agent_ids.join(', ') }}
               </span>
+              <span v-if="p.evidence"> · {{ p.evidence }}</span>
             </span>
             <p>{{ p.stance }}</p>
             <p v-if="p.previous_stance" class="meta">vorher: {{ p.previous_stance }}</p>
           </li>
         </ul>
         <p v-else class="empty">Positionen nach dem Lauf sichtbar.</p>
+
+        <h2>Argumententwicklung</h2>
+        <p class="lede-sm" v-if="sim?.discussion">
+          {{ sim.discussion.argument_count ?? 0 }} Argumente ·
+          {{ sim.discussion.repetition_blocks ?? 0 }} Wiederholungs-Blocks ·
+          max History {{ sim.discussion.max_argument_history_per_agent ?? '—' }}/Agent
+        </p>
+        <ul class="feed compact" v-if="discussionArgs.length">
+          <li v-for="(a, i) in discussionArgs" :key="'arg' + i">
+            <span class="meta">
+              u{{ a.agent_id }} · {{ a.evidence }}
+              <span v-if="a.round_n != null"> · R{{ a.round_n }}</span>
+            </span>
+            <p>{{ a.snippet }}</p>
+          </li>
+        </ul>
+        <p v-else class="empty">Argument-History nach dem Lauf sichtbar.</p>
 
         <h2>Beziehungen</h2>
         <p class="lede-sm" v-if="graphSummary">
@@ -1478,6 +1549,35 @@ h2 {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.mode-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--line);
+}
+.mode-pill.tone-live {
+  color: var(--danger, #e07a7a);
+}
+.mode-pill.tone-offline {
+  color: var(--ok, #7dcea0);
+}
+.mode-pill.tone-gate {
+  color: var(--warn, #e0b35a);
+}
+.thread-panel {
+  margin-top: 0.85rem;
+}
+.thread-panel h3 {
+  font-size: 0.95rem;
+  margin: 0 0 0.35rem;
+  font-weight: 500;
+}
+.badge.src-fail {
+  background: color-mix(in srgb, var(--danger, #e07a7a) 25%, transparent);
+  color: var(--danger, #e07a7a);
 }
 
 .agents li {

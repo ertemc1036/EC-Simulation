@@ -22,7 +22,7 @@ from .topic_context import (
 
 def _stance_bucket(agent_id: int) -> str:
     """Deterministic initial polarity bucket per agent."""
-    return ("pro", "contra", "exception")[agent_id % 3]
+    return ("pro", "contra", "conditional")[agent_id % 3]
 
 
 def _argument_line(
@@ -49,12 +49,13 @@ def _argument_line(
             f"ungeklärt; Inflations- und Steuerlast-Risiken überwiegen."
         )
         exception = (
-            f"Zielkonflikt: Pilot mit klaren Abbruchkriterien statt Sofort-Vollauszahlung; "
-            f"Übergangsfristen und soziale Abfederung nötig."
+            f"Bedingte Zustimmung: nur wenn Pilot mit klaren Abbruchkriterien "
+            f"statt Sofort-Vollauszahlung; Übergangsfristen und soziale Abfederung nötig."
         )
         shift_to_exception = (
             f"Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-            f"Piloten und Ausnahmeregelungen statt pauschaler Vollauszahlung."
+            f"Piloten und Ausnahmeregelungen statt pauschaler Vollauszahlung "
+            f"(nur mit Pilot und klaren Kriterien)."
         )
         shift_hold = (
             f"Ich halte dagegen und widerspreche klar: nein zur ungeprüften "
@@ -76,12 +77,12 @@ def _argument_line(
             f"klare Ausnahmen und Lieferfenster nötig."
         )
         exception = (
-            f"Zielkonflikt: Ausnahmeregelungen und Übergangsfristen statt "
-            f"pauschalem Verbot."
+            f"Bedingte Zustimmung: nur mit Ausnahmeregelungen und Übergangsfristen "
+            f"statt pauschalem Verbot."
         )
         shift_to_exception = (
             f"Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-            f"Ausnahmeregelungen statt pauschalem Verbot."
+            f"Ausnahmeregelungen statt pauschalem Verbot (nur mit Ausnahmen)."
         )
         shift_hold = (
             f"Ich halte dagegen und widerspreche klar: nein zum pauschalen Verbot."
@@ -94,11 +95,12 @@ def _argument_line(
             f"Ich lehne {measure} ab — Kosten und Nebenwirkungen sind unzureichend belegt."
         )
         exception = (
-            f"Zielkonflikt: schrittweise Einführung mit Ausnahmen statt Sofort-Vollumsetzung."
+            f"Bedingte Zustimmung: nur wenn schrittweise Einführung mit Ausnahmen "
+            f"statt Sofort-Vollumsetzung."
         )
         shift_to_exception = (
             f"Ich ändere meine Position nach dem Kommentar — werde überzeugt: "
-            f"Piloten und Ausnahmen statt Sofortumsetzung."
+            f"Piloten und Ausnahmen statt Sofortumsetzung (nur mit Pilot)."
         )
         shift_hold = (
             f"Ich halte dagegen und widerspreche klar: nein zur ungeprüften Sofortumsetzung."
@@ -108,7 +110,7 @@ def _argument_line(
 
     # Round arc: establish → react → shift/hold → consolidate.
     if round_n <= 1:
-        body = {"pro": pro, "contra": contra, "exception": exception}[bucket]
+        body = {"pro": pro, "contra": contra, "conditional": exception}[bucket]
     elif round_n == 2:
         body = agree if bucket == "pro" else (disagree if bucket == "contra" else exception)
     elif round_n == 3:

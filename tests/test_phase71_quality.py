@@ -182,7 +182,7 @@ def test_manual_arguments_have_clear_polarity_and_shifts():
                     contents.append(str(c))
     assert len(contents) >= 12
     pols = {_polarity(c) for c in contents}
-    assert "pro" in pols or "contra" in pols or "exception" in pols
+    assert "pro" in pols or "contra" in pols or "conditional" in pols or "exception" in pols
     assert any("ändere meine position" in c.lower() for c in contents)
     assert any("→kommentar#" in c.lower() for c in contents)
     # No instruction-style goal dumps.
@@ -222,7 +222,12 @@ def test_manual_engine_bge_quality_vs_bad_run(results_dir: Path):
 
     pol = data["agent_positions"]["polarity_distribution"]
     uncertain = int(pol.get("uncertain", 0)) + int(pol.get("unknown", 0))
-    clear = int(pol.get("pro", 0)) + int(pol.get("contra", 0)) + int(pol.get("exception", 0))
+    clear = (
+        int(pol.get("pro", 0))
+        + int(pol.get("contra", 0))
+        + int(pol.get("conditional", 0))
+        + int(pol.get("exception", 0))
+    )
     assert clear >= 8
     assert uncertain < 20  # was 48/50
 

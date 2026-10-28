@@ -54,7 +54,7 @@ def build_society_analytics(
 
     return {
         "phase": 7,
-        "quality_fix": "7.2",
+        "quality_fix": "7.3",
         "backend": "local",
         "execution_kind": execution_kind,
         "content_synthetic": execution_kind in {"manual", "scripted"},

@@ -39,6 +39,8 @@ _PHASE7_MARKERS = (
     ROOT / "backend" / "simulation" / "social_dynamics.py",
     ROOT / "backend" / "simulation" / "social_scheduler.py",
     ROOT / "backend" / "simulation" / "scripted_model.py",
+    ROOT / "backend" / "simulation" / "discussion_engine.py",
+    ROOT / "backend" / "simulation" / "prompts.py",
 )
 
 

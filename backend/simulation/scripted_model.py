@@ -130,6 +130,8 @@ class ScriptedReactiveModel(BaseModelBackend):
     shared_scheduler: SocialInteractionScheduler | None = None
     # Shared scenario text so offline stances stay thesis-specific (Phase 7.1).
     shared_scenario: str = ""
+    # Phase 7.3: shared discussion engine for anti-repetition (optional).
+    shared_discussion: Any = None
 
     def __init__(self, *, agent_id: int = 0, label: str = "scripted") -> None:
         super().__init__(model_type=ModelType.GPT_4O_MINI, model_config_dict={})
@@ -141,6 +143,21 @@ class ScriptedReactiveModel(BaseModelBackend):
         self._scheduler = ScriptedReactiveModel.shared_scheduler or SocialInteractionScheduler(
             scenario=label
         )
+
+    def _dedupe_content(self, content: str) -> str:
+        disc = ScriptedReactiveModel.shared_discussion
+        if disc is None or not hasattr(disc, "vary_scripted_body"):
+            return content
+        varied = disc.vary_scripted_body(
+            self.agent_id, content, call_index=self.call_count
+        )
+        disc.register_statement(
+            agent_id=self.agent_id,
+            text=varied,
+            evidence=f"scripted:{self.agent_id}:{self.call_count}",
+            round_n=None,
+        )
+        return varied
 
     def fail_after(self, n: int) -> None:
         self._fail_after = n
@@ -188,32 +205,26 @@ class ScriptedReactiveModel(BaseModelBackend):
         syn = synthetic_tag()
 
         if not ids or plan.target_post_id is None:
-            return (
-                "create_post",
-                {
-                    "content": (
-                        f"{syn} [{self.label}:{self.agent_id}] Beitrag #{n} — "
-                        f"{stance_seed} "
-                        f"(Runde {round_n}, Szenario-Reaktion)."
-                    )
-                },
+            body = self._dedupe_content(
+                f"{syn} [{self.label}:{self.agent_id}] Beitrag #{n} — "
+                f"{stance_seed} "
+                f"(Runde {round_n}, Szenario-Reaktion)."
             )
+            return ("create_post", {"content": body})
 
         target = int(plan.target_post_id)
 
         if not comment_ids or plan.target_comment_id is None:
+            body = self._dedupe_content(
+                f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                f"auf Post {target}. {stance_seed} "
+                f"(Partner "
+                f"{plan.partner_agent_id if plan.partner_agent_id is not None else 'n/a'}; "
+                f"kein parent_comment_id)."
+            )
             return (
                 "create_comment",
-                {
-                    "post_id": target,
-                    "content": (
-                        f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
-                        f"auf Post {target}. {stance_seed} "
-                        f"(Partner "
-                        f"{plan.partner_agent_id if plan.partner_agent_id is not None else 'n/a'}; "
-                        f"kein parent_comment_id)."
-                    ),
-                },
+                {"post_id": target, "content": body},
             )
 
         cid = int(plan.target_comment_id)
@@ -226,14 +237,16 @@ class ScriptedReactiveModel(BaseModelBackend):
             if hint == "dislike_comment":
                 return ("dislike_comment", {"comment_id": cid})
             if hint == "create_comment_ref" or round_n >= 3:
-                content = _scripted_ref_comment(
-                    label=self.label,
-                    agent_id=self.agent_id,
-                    comment_id=cid,
-                    round_n=round_n,
-                    partner=plan.partner_agent_id,
-                    call_index=n,
-                    scenario=scenario,
+                content = self._dedupe_content(
+                    _scripted_ref_comment(
+                        label=self.label,
+                        agent_id=self.agent_id,
+                        comment_id=cid,
+                        round_n=round_n,
+                        partner=plan.partner_agent_id,
+                        call_index=n,
+                        scenario=scenario,
+                    )
                 )
                 return (
                     "create_comment",
@@ -242,16 +255,14 @@ class ScriptedReactiveModel(BaseModelBackend):
             return ("like_post", {"post_id": target})
 
         if hint == "create_comment":
+            body = self._dedupe_content(
+                f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                f"auf Post {target}. {stance_seed} "
+                f"(kein parent_comment_id)."
+            )
             return (
                 "create_comment",
-                {
-                    "post_id": target,
-                    "content": (
-                        f"{syn} [{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
-                        f"auf Post {target}. {stance_seed} "
-                        f"(kein parent_comment_id)."
-                    ),
-                },
+                {"post_id": target, "content": body},
             )
         if hint == "like_post":
             return ("like_post", {"post_id": target})

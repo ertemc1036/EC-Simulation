@@ -87,7 +87,7 @@ def test_live_ceilings_unchanged_phase72():
     payload = cfg.status_payload()
     assert payload["llm_run_requires_approval"] is True
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
-    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v6"
+    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v7"
     # Token-context caps unchanged from Phase 4.1.
     assert MAX_FEED_POSTS == 4
     assert MAX_FEED_COMMENTS == 4
@@ -133,7 +133,7 @@ def test_live_comments_have_clear_polarity_after_fix():
     """Replay polarity classifier on live fixture texts (offline)."""
     data = json.loads(LIVE_FIXTURE.read_text(encoding="utf-8"))
     pols = [_polarity(c["content"]) for c in data["comments"]]
-    clear = [p for p in pols if p in {"pro", "contra", "exception"}]
+    clear = [p for p in pols if p in {"pro", "contra", "conditional", "exception"}]
     assert len(clear) >= 4
     assert "unknown" not in pols[:3] or len(clear) >= 4
     # Seed still unknown as stance.
@@ -236,7 +236,7 @@ def test_manual_engine_seed_and_social_metrics(results_dir: Path):
     state = _wait_terminal(engine)
     assert state["status"] in {"completed", "limit_reached"}
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "7.2"
+    assert data["meta"]["quality_fix"] in {"7.2", "7.3"}
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"]["live_llm_limits_unchanged"]["max_agents"] == 5
     # Manual path seeds via argument posts (no LLM seed); public still clean.
@@ -251,7 +251,12 @@ def test_manual_engine_seed_and_social_metrics(results_dir: Path):
     assert summary.get("cross_agent_replies", 0) >= 1
     assert summary.get("thread_refs", 0) >= 1
     pol = data["agent_positions"]["polarity_distribution"]
-    clear = int(pol.get("pro", 0)) + int(pol.get("contra", 0)) + int(pol.get("exception", 0))
+    clear = (
+        int(pol.get("pro", 0))
+        + int(pol.get("contra", 0))
+        + int(pol.get("conditional", 0))
+        + int(pol.get("exception", 0))
+    )
     assert clear >= 3
 
 
@@ -276,7 +281,7 @@ def test_offline_scale_scripted_social_dynamics(results_dir: Path, n: int):
     assert state["status"] in {"completed", "limit_reached"}, state.get("message")
     data = json.loads(Path(state["result_path"]).read_text(encoding="utf-8"))
     assert data["meta"]["execution_kind"] == "scripted"
-    assert data["meta"]["quality_fix"] == "7.2"
+    assert data["meta"]["quality_fix"] in {"7.2", "7.3"}
     # Scripted local model — no live OpenAI; paid unlock stays false.
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     assert data["meta"].get("content_synthetic") is True

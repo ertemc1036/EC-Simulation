@@ -241,6 +241,9 @@ class Settings:
                 "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                 "analytics_dashboard": True,
                 "zep_integrated": False,
+                "intelligent_discussion": True,
+                "individual_personas": True,
+                "quality_fix": "7.3",
             },
         }
 

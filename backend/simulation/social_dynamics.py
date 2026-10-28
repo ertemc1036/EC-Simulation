@@ -144,6 +144,15 @@ _CONTRA_MARKERS = (
     "oppose",
     "disagree with the ban",
     "protest",
+    # Live-LLM BGE critique (Phase 7.3 fixture 3202e35e).
+    "nicht ohne erhebliche risiken",
+    "finanzierung ungeklärt",
+    "wie dieses modell finanziert",
+    "steigende lohnkosten",
+    "lohnsteigerungen und zusätzliche kosten",
+    "arbeitsanreize und lohnkosten",
+    "auswirkungen auf arbeitsanreize",
+    "praktische evidenz für positive effekte",
 )
 
 # Balanced BGE / measure stance: support + incentive / wage caveats (not full contra).
@@ -156,6 +165,10 @@ _BGE_EXCEPTION_MARKERS = (
     "anrechnung des grundeinkommens",
     "kompatibilität mit löhnen",
     "basisabsicherung",
+    "zunächst in klar definierten pi",
+    "in klar definierten pilot",
+    "pilotversuchen",
+    "pilotversuch",
 )
 
 # Explicit mind-change language only (bare "Kompromiss" is too common).
@@ -254,8 +267,26 @@ _TEXT_DISAGREE_MARKERS = (
     "oppose that",
 )
 
-# Clear stance polarities (exception = Ausnahme vs. volles Verbot).
-_CLEAR_POLARITIES = frozenset({"pro", "contra", "exception"})
+# Clear stance polarities (Phase 7.3: conditional replaces legacy «exception»).
+_CLEAR_POLARITIES = frozenset({"pro", "contra", "conditional", "exception"})
+
+# Explicit conditional / «nur wenn» stance (Phase 7.3).
+_CONDITIONAL_MARKERS = (
+    "unter der bedingung",
+    "unter der voraussetzung",
+    "nur wenn",
+    "nur falls",
+    "sofern",
+    "bedingt zustimm",
+    "bedingte zustimmung",
+    "wenn klar gegenfinanziert",
+    "falls ein pilot",
+    "falls pilote",
+    "nur mit pilot",
+    "nur mit ausnahmen",
+    "nur mit übergangs",
+    "nur mit uebergangs",
+)
 
 
 def extract_local_comment_refs(content: str) -> list[int]:
@@ -276,7 +307,12 @@ def _is_seed_content(text: str) -> bool:
 
 
 def _polarity(text: str) -> str:
-    """Coarse stance polarity including exception / unknown / uncertain."""
+    """Coarse stance: pro/contra/conditional/uncertain/unknown (+ legacy exception).
+
+    Phase 7.3 prefers ``conditional`` for Ausnahme-/«nur wenn»-Stances.
+    ``exception`` remains as an alias return for classic mobility Ausnahme
+    markers so older fixtures/tests stay comparable; treat both as clear.
+    """
     raw = text or ""
     if _is_seed_content(raw):
         return "unknown"
@@ -284,6 +320,7 @@ def _polarity(text: str) -> str:
     if any(m in low for m in _UNCERTAIN_MARKERS):
         return "uncertain"
 
+    conditional_hit = sum(1 for m in _CONDITIONAL_MARKERS if m in low)
     pro = sum(1 for m in _PRO_MARKERS if m in low)
     if _PRO_BAN_RE.search(low):
         pro += 1
@@ -296,21 +333,23 @@ def _polarity(text: str) -> str:
     # BGE balancing (Anreize/Löhne) only when not a hard reject.
     exception = classic_exception + (bge_balance if contra == 0 else 0)
 
-    # Ausnahme-/Übergangsforderungen are a stable stance vs. full ban —
-    # not a synthetic pro from "Unterstützung" / "notwendig".
-    # Classic Ausnahme markers win even when soft contra ("mit Sorge") co-occurs.
+    # Explicit conditional language wins when not a hard reject.
+    if conditional_hit and contra == 0:
+        return "conditional"
+    # Ausnahme-/Übergangsforderungen → conditional (7.3); keep exception alias
+    # path via classic markers when no explicit conditional phrasing.
     if classic_exception and pro == 0:
-        return "exception"
+        return "conditional"
     if exception and pro > 0 and contra == 0:
-        return "exception"
+        return "conditional"
     if exception and pro == 0 and contra == 0:
-        return "exception"
+        return "conditional"
     if pro > contra and pro > 0:
         return "pro"
     if contra > pro and contra > 0:
         return "contra"
     if exception:
-        return "exception"
+        return "conditional"
     if mediating and pro == 0 and contra == 0:
         return "uncertain"
     if any(m in low for m in _SHIFT_MARKERS):
@@ -372,13 +411,15 @@ def _is_evidenced_change(
         return _is_explicit_shift(content)
     if new_polarity in {"unknown", "uncertain"} and prev_polarity in _CLEAR_POLARITIES:
         return _is_explicit_shift(content)
-    # Clear flip among pro / contra / exception only when polarity differs
+    # Clear flip among pro / contra / conditional only when polarity differs
     # and either it is a classic pro↔contra flip or shift language is present.
     if {prev_polarity, new_polarity} == {"pro", "contra"}:
         return True
+    # conditional ↔ exception is the same bucket (alias), not a change.
+    if {prev_polarity, new_polarity} <= {"conditional", "exception"}:
+        return False
     if prev_polarity in _CLEAR_POLARITIES and new_polarity in _CLEAR_POLARITIES:
-        # exception ↔ pro/contra requires explicit mind-change language
-        # (exception restatements must not invent switches).
+        # conditional/exception ↔ pro/contra requires explicit mind-change language
         return _is_explicit_shift(content)
     # Entering/leaving "shifting" only with explicit mind-change language.
     if "shifting" in {prev_polarity, new_polarity}:

@@ -41,6 +41,7 @@ from backend.config import (
 from backend.simulation.agent_generator import generate_agents
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
+from backend.simulation.discussion_engine import DiscussionEngine
 from backend.simulation.knowledge_graph import LocalKnowledgeGraph
 from backend.simulation.local_memory import LocalAgentMemory
 from backend.simulation.manual_script import build_manual_rounds
@@ -253,6 +254,7 @@ class SimulationState:
     oasis_reply: dict[str, Any] = field(default_factory=dict)
     scheduler: dict[str, Any] = field(default_factory=dict)
     society_overview: dict[str, Any] = field(default_factory=dict)
+    discussion: dict[str, Any] = field(default_factory=dict)
     execution_kind: str = "manual"  # manual | scripted | live_llm
     error: str | None = None
     result_path: str | None = None
@@ -293,6 +295,7 @@ class SimulationState:
             "oasis_reply": self.oasis_reply,
             "scheduler": self.scheduler,
             "society_overview": self.society_overview,
+            "discussion": self.discussion,
             "error": self.error,
             "result_path": self.result_path,
             "db_path": self.db_path,
@@ -336,6 +339,7 @@ class SimulationEngine:
         self._relationships = RelationshipDynamics()
         self._opinion = OpinionDynamics()
         self._scheduler = SocialInteractionScheduler()
+        self._discussion = DiscussionEngine()
         self._run_language: str = "de"
         self._run_scenario: str = ""
         self._agent_generation: str = "dynamic"
@@ -645,8 +649,10 @@ class SimulationEngine:
             self._relationships = RelationshipDynamics()
             self._opinion = OpinionDynamics()
             self._scheduler = SocialInteractionScheduler(scenario=scenario.strip())
+            self._discussion = DiscussionEngine()
             ScriptedReactiveModel.shared_scheduler = self._scheduler
             ScriptedReactiveModel.shared_scenario = scenario.strip()
+            ScriptedReactiveModel.shared_discussion = self._discussion
             self._limit_stop = False
             self._failed = False
             self._custom_prompts_verified = False
@@ -687,6 +693,7 @@ class SimulationEngine:
                 oasis_reply=reply_meta,
                 scheduler=self._scheduler.summary(),
                 society_overview=overview,
+                discussion=self._discussion.snapshot(),
                 db_path=str(db_path),
                 started_at=_utc_now(),
                 cost_summary=self._tracker.summary(),
@@ -947,6 +954,9 @@ class SimulationEngine:
                         f"{p.get('polarity') or '?'}: {p.get('stance') or ''}"
                     )
                     break
+            argument_context = engine._discussion.prompt_argument_hints(
+                profile.agent_id
+            )
             user_content = build_decision_prompt(
                 scenario=scenario,
                 goal=profile.goal,
@@ -957,6 +967,7 @@ class SimulationEngine:
                 memory_context=memory_context,
                 round_number=round_n,
                 position_context=position_context,
+                argument_context=argument_context,
             )
             user_msg = BaseMessage.make_user_message(
                 role_name="User",
@@ -1475,6 +1486,31 @@ class SimulationEngine:
             positions=positions_payload.get("positions") or [],
             step=sync_step,
         )
+        # Phase 7.3: argument history + logical threads (local refs only).
+        self._discussion.ingest_platform(
+            posts=self.state.posts,
+            comments=self.state.comments,
+            step=sync_step,
+            round_n=sync_step,
+        )
+        for pos in positions_payload.get("positions") or []:
+            aid = pos.get("agent_id")
+            evid = str(pos.get("evidence") or "")
+            stance = str(pos.get("stance") or "")
+            if aid is None or not evid or not stance:
+                continue
+            # Distinct source key so argument-dev does not collide with
+            # consolidate_from_positions dedup on the raw evidence string.
+            arg_evid = (
+                evid if evid.startswith("argument:") else f"argument:{evid}"
+            )
+            self._local_memory.remember_argument_development(
+                int(aid),
+                snippet=stance,
+                evidence=arg_evid,
+                step=sync_step,
+                polarity=str(pos.get("polarity") or "") or None,
+            )
         edge_specs = self._positions.social_edge_specs()
         self._knowledge_graph.rebuild(
             scenario=self._run_scenario or self.state.scenario,
@@ -1506,11 +1542,20 @@ class SimulationEngine:
         self.state.relationships = self._relationships.snapshot()
         self.state.opinion_dynamics = self._opinion.snapshot()
         self.state.knowledge_graph = self._knowledge_graph.to_dict()
+        self.state.discussion = self._discussion.snapshot()
         self.state.interaction_summary = _build_interaction_summary(
             comments=self.state.comments,
             reactions=self.state.reactions,
             knowledge_graph=self.state.knowledge_graph,
         )
+        # Merge discussion thread metrics into interaction summary (honest OASIS).
+        disc = self.state.discussion or {}
+        self.state.interaction_summary = {
+            **self.state.interaction_summary,
+            "discussion_arguments": disc.get("argument_count", 0),
+            "discussion_repetition_blocks": disc.get("repetition_blocks", 0),
+            "discussion_thread_events": disc.get("thread_events", 0),
+        }
         self.state.oasis_reply = oasis_reply_status()
         self.state.scheduler = self._scheduler.summary()
         pol = positions_payload.get("polarity_distribution") or {}
@@ -1596,7 +1641,7 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 7,
-                "quality_fix": "7.2",
+                "quality_fix": "7.3",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
                 "agent_count": agents_n,
@@ -1647,6 +1692,13 @@ class SimulationEngine:
                         "influenced_by",
                         "position_changed",
                     ],
+                    "polarity_labels": [
+                        "pro",
+                        "contra",
+                        "conditional",
+                        "uncertain",
+                        "unknown",
+                    ],
                 },
                 "society_intelligence": {
                     "long_term_memory_sourced": True,
@@ -1656,11 +1708,14 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "7.2",
+                    "quality_fix": "7.3",
                     "topic_aware_personas": True,
+                    "individual_personas": True,
                     "synthetic_offline_content": True,
                     "cross_agent_threads": True,
                     "public_seed_no_goal_leak": True,
+                    "intelligent_discussion": True,
+                    "argument_history_bounded": True,
                 },
             },
             "agents": self.state.agents,
@@ -1681,6 +1736,7 @@ class SimulationEngine:
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),
             "scheduler": self.state.scheduler,
             "society_overview": self.state.society_overview,
+            "discussion": self.state.discussion,
             "db_path": str(db_path),
         }
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

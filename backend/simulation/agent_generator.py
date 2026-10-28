@@ -535,7 +535,9 @@ _ROLE_CANON: dict[str, str] = {
     "burger": "Bürger",
     "unternehmen": "Unternehmen",
     "unternehmer": "Unternehmer",
+    "unternehmern": "Unternehmer",
     "politiker": "Politiker",
+    "politikern": "Politiker",
     "politik": "Politik",
     "verkehrsbetriebe": "Verkehrsbetriebe",
     "anwohnende": "Anwohnende",
@@ -549,10 +551,14 @@ _ROLE_CANON: dict[str, str] = {
     "taxi": "Taxi",
     "lieferdienste": "Lieferdienste",
     "arbeitnehmer": "Arbeitnehmer",
+    "arbeitnehmern": "Arbeitnehmer",
     "arbeitslose": "Arbeitslose",
+    "arbeitslosen": "Arbeitslose",
     "studierende": "Studierende",
+    "studierenden": "Studierende",
     "studenten": "Studierende",
     "rentner": "Rentner",
+    "rentnern": "Rentner",
     "selbststaendige": "Selbstständige",
     "selbständige": "Selbstständige",
     "oekonomen": "Ökonomen",
@@ -560,6 +566,119 @@ _ROLE_CANON: dict[str, str] = {
     "oekonom": "Ökonomen",
     "ökonom": "Ökonomen",
     "ökonomen": "Ökonomen",
+    # Live-LLM often says «Wirtschaftsexperten» — map to economists, not abstract group.
+    "wirtschaftsexperten": "Ökonomen",
+    "wirtschaftsexperte": "Ökonomen",
+    "wirtschaftswissenschaftler": "Ökonomen",
+}
+
+# Phase 7.3 — realistic individuals (name/age/occupation) per role; deterministic picks.
+_INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
+    "buerger": [
+        {"first": "Lena", "last": "Vogt", "age": 42, "occupation": "Verwaltungsangestellte"},
+        {"first": "Jonas", "last": "Berg", "age": 29, "occupation": "Fahrradkurier"},
+        {"first": "Ayla", "last": "Demir", "age": 51, "occupation": "Einzelhandelskauffrau"},
+    ],
+    "arbeitnehmer": [
+        {"first": "Mara", "last": "Keller", "age": 34, "occupation": "Pflegefachkraft"},
+        {"first": "Tim", "last": "Richter", "age": 45, "occupation": "Industrieelektroniker"},
+        {"first": "Nora", "last": "Hahn", "age": 28, "occupation": "Callcenter-Mitarbeiterin"},
+    ],
+    "arbeitslose": [
+        {"first": "Samir", "last": "Kohn", "age": 39, "occupation": "Arbeitssuchender"},
+        {"first": "Pia", "last": "Neumann", "age": 33, "occupation": "Umschülerin"},
+        {"first": "Lars", "last": "Otto", "age": 52, "occupation": "Langzeitarbeitsloser"},
+    ],
+    "studierende": [
+        {"first": "Emre", "last": "Yilmaz", "age": 22, "occupation": "Politikstudent"},
+        {"first": "Clara", "last": "Weiss", "age": 24, "occupation": "Medizinstudentin"},
+        {"first": "Jonas", "last": "Krämer", "age": 21, "occupation": "Informatikstudent"},
+    ],
+    "unternehmer": [
+        {"first": "Vera", "last": "Stein", "age": 47, "occupation": "KMU-Gründerin"},
+        {"first": "Holger", "last": "Brandt", "age": 54, "occupation": "Handwerksmeister"},
+        {"first": "Ines", "last": "Fuchs", "age": 38, "occupation": "Software-Unternehmerin"},
+    ],
+    "unternehmen": [
+        {"first": "Ralf", "last": "Meissner", "age": 49, "occupation": "Betriebsratsvorsitzender"},
+        {"first": "Silke", "last": "Horn", "age": 43, "occupation": "Personalchefin"},
+        {"first": "Gero", "last": "Lang", "age": 56, "occupation": "Logistikleiter"},
+    ],
+    "rentner": [
+        {"first": "Helga", "last": "Pohl", "age": 71, "occupation": "Rentnerin"},
+        {"first": "Werner", "last": "Kraus", "age": 68, "occupation": "Frührentner"},
+        {"first": "Inge", "last": "Seidel", "age": 74, "occupation": "Rentnerin"},
+    ],
+    "selbststaendige": [
+        {"first": "Omar", "last": "Said", "age": 36, "occupation": "Freiberuflicher Designer"},
+        {"first": "Nina", "last": "Graf", "age": 41, "occupation": "Solo-Selbstständige"},
+        {"first": "Felix", "last": "Busch", "age": 32, "occupation": "IT-Freelancer"},
+    ],
+    "politiker": [
+        {"first": "Karin", "last": "Wolff", "age": 48, "occupation": "Stadträtin"},
+        {"first": "Tobias", "last": "Engel", "age": 39, "occupation": "Landtagsabgeordneter"},
+        {"first": "Svenja", "last": "Krug", "age": 44, "occupation": "Bezirksbürgermeisterin"},
+    ],
+    "politik": [
+        {"first": "Karin", "last": "Wolff", "age": 48, "occupation": "Stadträtin"},
+        {"first": "Tobias", "last": "Engel", "age": 39, "occupation": "Landtagsabgeordneter"},
+        {"first": "Svenja", "last": "Krug", "age": 44, "occupation": "Bezirksbürgermeisterin"},
+    ],
+    "oekonomen": [
+        {"first": "Dr. Anke", "last": "Meier", "age": 46, "occupation": "Arbeitsmarktforscherin"},
+        {"first": "Prof. Jan", "last": "Schulz", "age": 53, "occupation": "Finanzwissenschaftler"},
+        {"first": "Lea", "last": "Hofmann", "age": 35, "occupation": "Wirtschaftsanalystin"},
+    ],
+    "oekonom": [
+        {"first": "Dr. Anke", "last": "Meier", "age": 46, "occupation": "Arbeitsmarktforscherin"},
+        {"first": "Prof. Jan", "last": "Schulz", "age": 53, "occupation": "Finanzwissenschaftler"},
+        {"first": "Lea", "last": "Hofmann", "age": 35, "occupation": "Wirtschaftsanalystin"},
+    ],
+    "anwohnende": [
+        {"first": "Greta", "last": "Lind", "age": 37, "occupation": "Anwohnerin"},
+        {"first": "Paul", "last": "Mertens", "age": 58, "occupation": "Anwohner"},
+        {"first": "Sibel", "last": "Acar", "age": 31, "occupation": "Mieterin"},
+    ],
+    "verkehrsbetriebe": [
+        {"first": "Uwe", "last": "Hartmann", "age": 50, "occupation": "ÖPNV-Planer"},
+        {"first": "Miriam", "last": "König", "age": 34, "occupation": "Fahrdienstleiterin"},
+        {"first": "Dirk", "last": "Sommer", "age": 45, "occupation": "Betriebsleiter Nahverkehr"},
+    ],
+    "handel": [
+        {"first": "Beate", "last": "König", "age": 52, "occupation": "Ladeninhaberin"},
+        {"first": "Murat", "last": "Celik", "age": 40, "occupation": "Supermarktfilialleiter"},
+        {"first": "Ilona", "last": "Beyer", "age": 47, "occupation": "Einzelhändlerin"},
+    ],
+    "gewerbe": [
+        {"first": "Klaus", "last": "Weber", "age": 55, "occupation": "Gewerbetreibender"},
+        {"first": "Sabine", "last": "Roth", "age": 42, "occupation": "Handwerksbetriebsleiterin"},
+        {"first": "Ahmed", "last": "Farouk", "age": 38, "occupation": "Gastronom"},
+    ],
+    "behoerden": [
+        {"first": "Petra", "last": "Lange", "age": 49, "occupation": "Amtsleiterin"},
+        {"first": "Martin", "last": "Koch", "age": 44, "occupation": "Ordnungsamtsmitarbeiter"},
+        {"first": "Judith", "last": "Frei", "age": 36, "occupation": "Sachbearbeiterin"},
+    ],
+    "verwaltung": [
+        {"first": "Petra", "last": "Lange", "age": 49, "occupation": "Amtsleiterin"},
+        {"first": "Martin", "last": "Koch", "age": 44, "occupation": "Ordnungsamtsmitarbeiter"},
+        {"first": "Judith", "last": "Frei", "age": 36, "occupation": "Sachbearbeiterin"},
+    ],
+    "polizei": [
+        {"first": "Stefan", "last": "Wolf", "age": 41, "occupation": "Polizeihauptkommissar"},
+        {"first": "Yasmin", "last": "Said", "age": 33, "occupation": "Polizeikommissarin"},
+        {"first": "Bernd", "last": "Tietz", "age": 52, "occupation": "Verkehrspolizist"},
+    ],
+    "taxi": [
+        {"first": "Hassan", "last": "Ali", "age": 46, "occupation": "Taxifahrer"},
+        {"first": "Monika", "last": "Schulz", "age": 39, "occupation": "Taxiunternehmerin"},
+        {"first": "Igor", "last": "Petrov", "age": 51, "occupation": "Taxifahrer"},
+    ],
+    "lieferdienste": [
+        {"first": "Kai", "last": "Nguyen", "age": 26, "occupation": "Fahrradkurier"},
+        {"first": "Elena", "last": "Popov", "age": 30, "occupation": "Lieferdienst-Dispatcherin"},
+        {"first": "Ben", "last": "Adler", "age": 23, "occupation": "App-Lieferfahrer"},
+    ],
 }
 
 _DEFAULT_STAKEHOLDERS = ("Bürger", "Unternehmen", "Politik")
@@ -904,6 +1023,31 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
     return table
 
 
+def _pick_individual(
+    role_key: str,
+    *,
+    scenario: str,
+    agent_id: int,
+) -> dict[str, object]:
+    """Deterministic individual (name/age/occupation) for a role key."""
+    pool = _INDIVIDUALS_BY_ROLE.get(role_key) or []
+    if not pool:
+        # Fallback individual from first-name table — never an abstract group label.
+        first = _FIRST_NAMES[(agent_id + len(role_key)) % len(_FIRST_NAMES)]
+        last = _FIRST_NAMES[(agent_id * 3 + 7) % len(_FIRST_NAMES)]
+        age = 24 + ((agent_id * 11 + len(scenario)) % 40)
+        return {
+            "first": first,
+            "last": last,
+            "age": age,
+            "occupation": role_key.replace("_", " ")[:28] or "Teilnehmer/in",
+        }
+    digest = hashlib.sha1(
+        f"{scenario}|{agent_id}|{role_key}|indiv".encode("utf-8")
+    ).hexdigest()
+    return dict(pool[int(digest[:8], 16) % len(pool)])
+
+
 def _persona_for_role(
     role: str,
     arch_fallback: dict[str, str],
@@ -913,21 +1057,24 @@ def _persona_for_role(
     key = _role_key(role)
     table = _persona_table_for_domain(domain)
     if key in table:
-        return dict(table[key])
-    # Generic role → blend with archetype voice but keep role identity.
+        base = dict(table[key])
+        base["role_label"] = base.get("name") or role
+        return base
+    # Unknown role → keep voice, but never use the raw group noun as display name.
+    label = role[:1].upper() + role[1:]
     return {
-        "name": role[:1].upper() + role[1:],
+        "name": label,
         "slug": _slugify(role) or arch_fallback["slug"],
         "description": (
-            f"Vertritt die Perspektive «{role}» und prüft Folgen für diese Gruppe. "
-            f"{arch_fallback['description']}"
+            f"Spricht aus der Perspektive «{label}». {arch_fallback['description']}"
         ),
-        "goal": f"Interessen von {role} im Szenario klar vertreten. {arch_fallback['goal']}",
+        "goal": f"Interessen von {label} im Szenario klar vertreten. {arch_fallback['goal']}",
         "conflict": (
-            f"Vertrete konsequent «{role}» gegen konkurrierende Stakeholder-Interessen; "
+            f"Vertrete konsequent «{label}» gegen konkurrierende Stakeholder-Interessen; "
             f"keine ausgewogene Gesamtschau aller Seiten."
         ),
         "style": arch_fallback["style"],
+        "role_label": label,
     }
 
 
@@ -953,10 +1100,11 @@ def generate_dynamic_agents(
     *,
     max_agents: int = MAX_GENERATABLE_AGENTS,
 ) -> list[AgentProfile]:
-    """Build ``count`` unique scenario-bound profiles (no clones).
+    """Build ``count`` unique scenario-bound individual personas (no clones).
 
-    Scales deterministically to offline presets 10/25/50. Live-LLM callers
-    must pass ``max_agents=LIVE_LLM_MAX_AGENTS`` (5).
+    Phase 7.3: every agent is a person (Name, Alter, Beruf) — never an abstract
+    group label like «Arbeitnehmern». Scales deterministically to 10/25/50.
+    Live-LLM callers must pass ``max_agents=LIVE_LLM_MAX_AGENTS`` (5).
     """
     n = max(1, min(int(count), int(max_agents), MAX_GENERATABLE_AGENTS))
     domain = detect_topic_domain(scenario)
@@ -975,14 +1123,24 @@ def generate_dynamic_agents(
         voice_id = _unique_suffix(short, i, arch["slug"])
         if i < len(roles):
             persona = _persona_for_role(roles[i], arch, domain=domain)
-            display = persona["name"]
-            # Disambiguate if the same role maps twice.
+            role_key = _role_key(roles[i])
+            # Prefer canonical key used by individual pools.
+            if role_key not in _INDIVIDUALS_BY_ROLE and persona.get("slug"):
+                role_key = _role_key(str(persona["slug"]))
+            indiv = _pick_individual(role_key, scenario=short, agent_id=i)
+            first = str(indiv["first"])
+            last = str(indiv["last"])
+            age = int(indiv["age"])  # type: ignore[arg-type]
+            occupation = str(indiv["occupation"])
+            display = f"{first} {last}"
             if display.lower() in used_names:
-                display = f"{persona['name']} {i + 1}"
-            user_name = f"{persona['slug']}_{voice_id}"
+                display = f"{first} {last} {voice_id}"
+            role_label = str(persona.get("role_label") or persona.get("name") or roles[i])
+            user_name = f"{_slugify(first)}_{_slugify(last)}_{voice_id}"
             description = (
-                f"{persona['description']} Perspektive zu «{measure}» "
-                f"(Thema: {topic}). Stimme #{i + 1}/{n} ({voice_id})."
+                f"{age}, {occupation}. {persona['description']} "
+                f"Perspektive «{role_label}» zu «{measure}» (Thema: {topic}). "
+                f"Stimme #{i + 1}/{n} ({voice_id})."
             )
             conflict = persona.get("conflict") or _archetype_conflict(arch)
             # Goal stays instruction-only (never copied into public posts).
@@ -993,12 +1151,16 @@ def generate_dynamic_agents(
             style = persona["style"]
         else:
             first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
-            display = f"{first} {arch['name']}"
+            last = _FIRST_NAMES[(i * 5 + 11) % len(_FIRST_NAMES)]
+            age = 24 + ((i * 13 + len(short)) % 40)
+            occupation = arch["name"]
+            display = f"{first} {last}"
             if display.lower() in used_names:
-                display = f"{first} {arch['name']} {voice_id}"
-            user_name = f"{_slugify(first)}_{arch['slug']}_{voice_id}"
+                display = f"{first} {last} {voice_id}"
+            user_name = f"{_slugify(first)}_{_slugify(last)}_{arch['slug']}_{voice_id}"
+            role_label = arch["name"]
             description = (
-                f"{arch['description']} Perspektive zu «{measure}» "
+                f"{age}, {occupation}. {arch['description']} Perspektive zu «{measure}» "
                 f"(Thema: {topic}). Stimme #{i + 1}/{n} ({voice_id})."
             )
             goal = (
@@ -1017,6 +1179,9 @@ def generate_dynamic_agents(
             description=description,
             goal=goal,
             style=style,
+            age=age,
+            occupation=occupation,
+            role_label=role_label,
         )
         used_names.add(display.lower())
         used_user_names.add(user_name)
