@@ -104,10 +104,55 @@ def _empty_interaction_summary() -> dict[str, Any]:
         "comments": 0,
         "post_reactions": 0,
         "comment_reactions": 0,
+        "self_replies": 0,
+        "cross_agent_replies": 0,
+        "thread_refs": 0,
         "note": (
             "Nur belegte Social-Relations (like_*/dislike_*/create_comment/"
             "lokale Kommentar-Refs/Positionswechsel). OASIS: kein parent_comment_id."
         ),
+    }
+
+
+def _comment_thread_metrics(comments: list[dict[str, Any]]) -> dict[str, int]:
+    """Count →Kommentar# self vs cross-agent refs (evidence only, no invention)."""
+    from backend.simulation.social_dynamics import extract_local_comment_refs
+
+    by_id: dict[int, int] = {}
+    for c in comments:
+        cid = c.get("comment_id")
+        uid = c.get("user_id")
+        if cid is None or uid is None:
+            continue
+        try:
+            by_id[int(cid)] = int(uid)
+        except (TypeError, ValueError):
+            continue
+    self_replies = 0
+    cross_replies = 0
+    thread_refs = 0
+    for c in comments:
+        uid = c.get("user_id")
+        if uid is None:
+            continue
+        try:
+            author = int(uid)
+        except (TypeError, ValueError):
+            continue
+        refs = extract_local_comment_refs(str(c.get("content") or ""))
+        for ref in refs:
+            thread_refs += 1
+            target_uid = by_id.get(ref)
+            if target_uid is None:
+                continue
+            if target_uid == author:
+                self_replies += 1
+            else:
+                cross_replies += 1
+    return {
+        "self_replies": self_replies,
+        "cross_agent_replies": cross_replies,
+        "thread_refs": thread_refs,
     }
 
 
@@ -122,6 +167,7 @@ def _build_interaction_summary(
     sr = knowledge_graph.get("social_relations") or {}
     post_rx = sum(1 for r in reactions if r.get("post_id") is not None)
     comment_rx = sum(1 for r in reactions if r.get("comment_id") is not None)
+    threads = _comment_thread_metrics(comments)
     return {
         "replied_to": int(ir.get("replied_to") or 0),
         "agrees_with": int(sr.get("agrees_with") or ir.get("agrees_with") or 0),
@@ -134,9 +180,13 @@ def _build_interaction_summary(
         "comments": len(comments),
         "post_reactions": post_rx,
         "comment_reactions": comment_rx,
+        "self_replies": threads["self_replies"],
+        "cross_agent_replies": threads["cross_agent_replies"],
+        "thread_refs": threads["thread_refs"],
         "note": (
             "Nur belegte Social-Relations. OASIS: kein parent_comment_id — "
-            "Reply = create_comment(post_id); Kommentar→Kommentar via →Kommentar#id."
+            "Reply = create_comment(post_id); Kommentar→Kommentar via →Kommentar#id; "
+            "self_replies/cross_agent_replies aus belegten →Kommentar#-Refs."
         ),
     }
 
@@ -1114,12 +1164,12 @@ class SimulationEngine:
         self, env, scenario: str, max_steps: int, db_path: Path, language: str
     ) -> None:
         # Seed so agents have content to perceive (ManualAction, not billed).
+        # Public feed must not leak goals, IDs, style, or prompt instructions.
+        from backend.simulation.topic_context import build_public_seed_content
+
         seed_profile = self._run_agents[0]
         seed_agent = env.agent_graph.get_agent(seed_profile.agent_id)
-        seed_content = (
-            f"[Seed / {seed_profile.name}] Diskussionsimpuls ({language}): "
-            f"{scenario[:500]} — Ziel: {seed_profile.goal}"
-        )
+        seed_content = build_public_seed_content(scenario, language=language)
         seed = ManualAction(
             action_type=ActionType.CREATE_POST,
             action_args={"content": seed_content},
@@ -1546,7 +1596,7 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 7,
-                "quality_fix": "7.1",
+                "quality_fix": "7.2",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
                 "agent_count": agents_n,
@@ -1606,9 +1656,11 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "7.1",
+                    "quality_fix": "7.2",
                     "topic_aware_personas": True,
                     "synthetic_offline_content": True,
+                    "cross_agent_threads": True,
+                    "public_seed_no_goal_leak": True,
                 },
             },
             "agents": self.state.agents,

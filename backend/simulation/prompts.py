@@ -53,6 +53,7 @@ _OASIS_MESSAGES_NOISE_RE = re.compile(
 SYSTEM_PROMPT_TEMPLATE = TextPrompt(
     """# ZIEL / OBJECTIVE
 Foren-Diskussion (kein Twitter). Nur das Szenario; keine Tweet-/Like-Spam-Meta-Posts.
+Keine System-/Prompt-/Zielkonflikt-/Stil-Texte in Posts oder Kommentaren.
 
 # SZENARIO
 {scenario}
@@ -67,11 +68,12 @@ Stil: {style}
 {language_instruction}
 
 # REGELN
-1. Inhalte in der angegebenen Sprache.
+1. Inhalte in der angegebenen Sprache; kurze Argumente aus deiner Perspektive.
 2. Aktionen dienen deinem Ziel — nicht fremde Stakeholder mitzusammenfassen.
 3. Interaktion: create_comment(post_id) als Reply (kein parent_comment_id); bei Bezug auf Kommentar →Kommentar#id im Text; like_*/dislike_* auf Post/Kommentar-IDs; kein search/refresh wenn FEED IDs zeigt; kein doppelter Essay-Post.
-4. Position halten oder begründet ändern; Runde 2+: auf Kommentar# reagieren (like_comment/dislike_comment).
-5. Tool-Calling only; in Rolle bleiben.
+4. KEINE Self-Replies: antworte nie mit →Kommentar# auf deine eigenen Kommentar-IDs; bevorzuge Cross-Agent-Bezüge (andere Nutzer).
+5. Position halten oder begründet ändern; Runde 2+: Thread fortsetzen (→Kommentar# fremd) und/oder like_comment/dislike_comment.
+6. Tool-Calling only; in Rolle bleiben; keine erfundenen Posts/Kommentare ohne Tool-Call.
 """
 )
 
@@ -236,7 +238,8 @@ def format_feed_context(
         )
     lines: list[str] = [
         "IDs behalten. Reply=create_comment(post_id); kein parent_comment_id; "
-        "Kommentar-Bezug: →Kommentar#id im Text; R2+: like_comment/dislike_comment."
+        "Kommentar-Bezug: →Kommentar#id nur auf FREMDE Kommentare; "
+        "kein Self-Reply; R2+: like_comment/dislike_comment + Thread."
     ]
     recent = select_prioritized_posts(
         posts or [], viewer_id=viewer_id, max_posts=max_posts
@@ -249,17 +252,36 @@ def format_feed_context(
             f"- Post#{pid} u{uid} (reply→post_id={pid}): "
             f"{content[:POST_CONTENT_CHARS]}"
         )
-    for c in select_prioritized_comments(
+    selected_comments = select_prioritized_comments(
         comments or [], viewer_id=viewer_id, max_comments=max_comments
-    ):
+    )
+    foreign_ids: list[int] = []
+    for c in selected_comments:
         cid = c.get("comment_id")
         pid = c.get("post_id")
         uid = c.get("user_id")
         content = str(c.get("content") or "").replace("\n", " ").strip()
+        own = False
+        if viewer_id is not None and uid is not None:
+            try:
+                own = int(uid) == int(viewer_id)
+            except (TypeError, ValueError):
+                own = False
+        own_tag = " [EIGEN — nicht →Kommentar# darauf]" if own else " [fremd — Reply-Ziel]"
+        if not own and cid is not None:
+            try:
+                foreign_ids.append(int(cid))
+            except (TypeError, ValueError):
+                pass
         lines.append(
-            f"- Kommentar#{cid}→Post#{pid} u{uid} "
+            f"- Kommentar#{cid}→Post#{pid} u{uid}{own_tag} "
             f"(comment_id={cid}; reply→post_id={pid}): "
             f"{content[:COMMENT_CONTENT_CHARS]}"
+        )
+    if foreign_ids:
+        lines.append(
+            "Bevorzugte Cross-Agent-Ziele: "
+            + ", ".join(f"→Kommentar#{i}" for i in foreign_ids[:4])
         )
     return "\n".join(lines)
 
@@ -325,14 +347,17 @@ def build_decision_prompt(
     round_n = int(round_number) if round_number is not None else 1
     if round_n >= 2:
         interact = (
-            "INTERAKTIONSKONTEXT Runde 2+: like_comment/dislike_comment auf "
-            "sichtbare Kommentar#; oder create_comment(post_id) mit →Kommentar#id "
-            "im Text (kein parent_comment_id); Position halten/ändern."
+            "INTERAKTIONSKONTEXT Runde 2+: Cross-Agent-Thread — "
+            "like_comment/dislike_comment auf fremde Kommentar#; "
+            "oder create_comment(post_id) mit →Kommentar#id auf FREMDE Kommentare "
+            "(kein Self-Reply, kein parent_comment_id); "
+            "Argument mit Bezug + eigener Perspektive; Position halten/ändern."
         )
     else:
         interact = (
-            "INTERAKTIONSKONTEXT: create_comment(post_id) / like_* / dislike_*; "
-            "kein search/refresh, kein doppelter Essay."
+            "INTERAKTIONSKONTEXT: create_comment(post_id) mit klarem Argument "
+            "aus deiner Rolle; optional like_*/dislike_*; "
+            "kein search/refresh, kein doppelter Essay, kein Goal-/Stil-Dump."
         )
     pos = (position_context or "").strip()
     pos_line = f"\nPOSITION: {pos[:160]}" if pos else ""

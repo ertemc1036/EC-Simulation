@@ -122,7 +122,7 @@ class SocialInteractionScheduler:
         round_n: int = 1,
         prefer_partner: int | None = None,
     ) -> int | None:
-        """Pick a comment id to like/ref; never the agent's own as sole preference."""
+        """Pick a comment id to like/ref — never own; None if no foreign comments."""
         usable: list[tuple[int, int]] = []
         for c in comments:
             cid = c.get("comment_id")
@@ -132,8 +132,12 @@ class SocialInteractionScheduler:
             usable.append((int(cid), int(uid)))
         if not usable:
             return None
+        # Phase 7.2: refuse self-targets entirely (blocks self-replies / self-likes).
+        foreign = [(cid, uid) for cid, uid in usable if uid != agent_id]
+        if not foreign:
+            return None
         if prefer_partner is not None:
-            partner_cs = [cid for cid, uid in usable if uid == prefer_partner]
+            partner_cs = [cid for cid, uid in foreign if uid == prefer_partner]
             if partner_cs:
                 partner_cs.sort(
                     key=lambda cid: _stable_rank(
@@ -141,8 +145,7 @@ class SocialInteractionScheduler:
                     )
                 )
                 return partner_cs[0]
-        foreign = [cid for cid, uid in usable if uid != agent_id]
-        pool = foreign or [cid for cid, _uid in usable]
+        pool = [cid for cid, _uid in foreign]
         pool.sort(
             key=lambda cid: _stable_rank(
                 self._seed(agent_id, round_n, "comment"), cid

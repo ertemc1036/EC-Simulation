@@ -37,9 +37,11 @@ OASIS_REPLY_API: dict[str, Any] = {
         "or LIKE_COMMENT / DISLIKE_COMMENT on the observed id — no quotas; "
         "additionally, clear textual agree/disagree markers in a comment that "
         "already contains a resolvable →Kommentar# ref (Phase 5.2). "
-        "Round 2+: prefer like_comment/dislike_comment on visible Kommentar# IDs."
+        "Round 2+: prefer like_comment/dislike_comment on visible Kommentar# IDs. "
+        "Phase 7.2: never →Kommentar# self-replies; prefer cross-agent threads."
     ),
     "local_comment_ref_convention": "→Kommentar#<id> inside create_comment content",
+    "self_reply_policy": "forbidden — cross-agent →Kommentar# only",
     "interaction_tools": [
         "create_comment",  # reply to post
         "like_post",

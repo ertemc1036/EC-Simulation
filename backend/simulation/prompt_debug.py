@@ -13,8 +13,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # Stable id for the EC custom prompt bundle (system + decision templates).
-# v5 = Phase 5 social dynamics (positions + R2 comment reactions) on v4 caps.
-PROMPT_BUNDLE_ID = "ec-custom-forum-de-v5"
+# v6 = Phase 7.2 live social dynamics (cross-agent threads, no self-reply,
+# public seed without goal leak) on v5 caps / token limits.
+PROMPT_BUNDLE_ID = "ec-custom-forum-de-v6"
 
 # Markers that prove OASIS stock Reddit/Twitter framing reached the client.
 OASIS_REDDIT_OBJECTIVE = "You're a Reddit user"
@@ -109,6 +110,9 @@ def analyze_messages(
         or "Likes-zum-Liken" in blob
         or "Tweet-/Like-Spam-Meta-Posts" in blob,
         "deutsch_instruction": "auf Deutsch" in blob or "Sprache für alle Inhalte: Deutsch" in blob,
+        "cross_agent_no_self_reply": "Self-Repl" in blob or "kein Self-Reply" in blob
+        or "KEINE Self-Replies" in blob,
+        "cross_agent_prefer": "Cross-Agent" in blob or "fremd — Reply-Ziel" in blob,
         "oasis_reddit_objective": OASIS_REDDIT_OBJECTIVE in blob,
         "oasis_twitter_objective": OASIS_TWITTER_OBJECTIVE in blob,
         "oasis_tweet_bait": OASIS_TWEET_BAIT in blob,

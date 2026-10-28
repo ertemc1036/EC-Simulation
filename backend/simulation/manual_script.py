@@ -210,14 +210,42 @@ def build_manual_rounds(
         rounds.append(react)
 
     # Round 2 — follow-ups with →Kommentar# refs + agree/disagree markers.
+    # comment_id roughly maps 1..len(reactors) from round 1; refs must be cross-agent.
     follow: dict[int, list[ManualAction]] = {}
-    # comment_id roughly maps 1..len(reactors) from round 1; use modular refs.
     comment_count = max(1, len(reactors))
+    # Map comment_id → author (reactors[j] wrote comment j+1).
+    comment_author = {j + 1: reactors[j] for j in range(comment_count)}
     for i, aid in enumerate(ids[: min(len(ids), max(6, seed_n + 4))]):
         a = by_id[aid]
-        ref_cid = (i % comment_count) + 1
+        # Prefer a foreign comment id (never self-reply).
+        ref_cid = None
+        for offset in range(1, comment_count + 1):
+            cand = ((i + offset) % comment_count) + 1
+            if comment_author.get(cand) != aid:
+                ref_cid = cand
+                break
+        if ref_cid is None:
+            ref_cid = (i % comment_count) + 1
+            if comment_author.get(ref_cid) == aid:
+                ref_cid = None  # skip self-ref entirely
         target_post = (i % seed_n) + 1 if seed_n else 1
-        follow[aid] = [
+        acts: list[ManualAction] = []
+        # Phase 7.2: explicit comment reactions toward foreign comments.
+        if ref_cid is not None and i % 2 == 0:
+            acts.append(
+                ManualAction(
+                    action_type=ActionType.LIKE_COMMENT,
+                    action_args={"comment_id": ref_cid},
+                )
+            )
+        elif ref_cid is not None:
+            acts.append(
+                ManualAction(
+                    action_type=ActionType.DISLIKE_COMMENT,
+                    action_args={"comment_id": ref_cid},
+                )
+            )
+        acts.append(
             ManualAction(
                 action_type=ActionType.CREATE_COMMENT,
                 action_args={
@@ -230,7 +258,8 @@ def build_manual_rounds(
                     ),
                 },
             )
-        ]
+        )
+        follow[aid] = acts
     # Extra summary post to keep discussion multi-threaded.
     if len(ids) >= 3:
         a2 = by_id[ids[2]]
@@ -262,7 +291,12 @@ def build_manual_rounds(
     summary_post = seed_n + 1 if len(ids) >= 3 else 1
     for i, aid in enumerate(ids[: min(len(ids), max(8, seed_n + 2))]):
         a = by_id[aid]
-        ref_cid = (i % comment_count) + 1
+        ref_cid = None
+        for offset in range(1, comment_count + 1):
+            cand = ((i + offset) % comment_count) + 1
+            if comment_author.get(cand) != aid:
+                ref_cid = cand
+                break
         shift[aid] = [
             ManualAction(
                 action_type=ActionType.CREATE_COMMENT,
