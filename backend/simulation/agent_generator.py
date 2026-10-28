@@ -384,7 +384,7 @@ _ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
     "unternehmen": {
         "name": "Unternehmensvertretung",
         "slug": "unternehmen",
-        "description": "Vertritt Betriebe bei Schichtplanung und Kosten.",
+        "description": "Vertritt die Unternehmensleitung bei Schichtplanung und Kosten.",
         "goal": "Betriebliche Risiken und praktikable Übergänge benennen.",
         "conflict": (
             "Fordere Übergangsregeln für «{measure}»; widersprich pauschalen "
@@ -392,10 +392,21 @@ _ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
         ),
         "style": "kostenbewusst, lösungsorientiert, nüchtern",
     },
+    "betriebsrat": {
+        "name": "Betriebsratsstimme",
+        "slug": "betriebsrat",
+        "description": "Vertritt die Belegschaft in Betriebsvereinbarungen und Schichtfragen.",
+        "goal": "Beschäftigtenrechte und Mitbestimmung bei Arbeitszeit sichern.",
+        "conflict": (
+            "Unterstütze «{measure}» nur mit echtem Lohnausgleich und Mitbestimmung; "
+            "widersprich Modellen, die Leistungsdruck ohne Entlastung erhöhen."
+        ),
+        "style": "mitarbeiterbezogen, tarifklar, pragmatisch",
+    },
     "oekonomen": {
-        "name": "Ökonomenstimme",
+        "name": "Wirtschaftsexperte",
         "slug": "oekonomen",
-        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte am Arbeitsmarkt.",
         "goal": "Empirische Risiken und Annahmen offenlegen.",
         "conflict": (
             "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
@@ -404,9 +415,9 @@ _ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
         "style": "analytisch, vorsichtig",
     },
     "oekonom": {
-        "name": "Ökonomenstimme",
+        "name": "Wirtschaftsexperte",
         "slug": "oekonom",
-        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte am Arbeitsmarkt.",
         "goal": "Empirische Risiken und Annahmen offenlegen.",
         "conflict": (
             "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
@@ -415,9 +426,9 @@ _ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
         "style": "analytisch, vorsichtig",
     },
     "wirtschaftsexperten": {
-        "name": "Ökonomenstimme",
+        "name": "Wirtschaftsexperte",
         "slug": "oekonomen",
-        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte am Arbeitsmarkt.",
         "goal": "Empirische Risiken und Annahmen offenlegen.",
         "conflict": (
             "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
@@ -685,6 +696,11 @@ _ROLE_CANON: dict[str, str] = {
     "wirtschaftsexperten": "Ökonomen",
     "wirtschaftsexperte": "Ökonomen",
     "wirtschaftswissenschaftler": "Ökonomen",
+    # Live labor prompts («… und den Arbeitsmarkt») → economic expert, not Moderator.
+    "arbeitsmarkt": "Ökonomen",
+    "betriebsrat": "Betriebsrat",
+    "betriebsraete": "Betriebsrat",
+    "betriebsräte": "Betriebsrat",
 }
 
 # Phase 7.3 — realistic individuals (name/age/occupation) per role; deterministic picks.
@@ -714,10 +730,16 @@ _INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
         {"first": "Holger", "last": "Brandt", "age": 54, "occupation": "Handwerksmeister"},
         {"first": "Ines", "last": "Fuchs", "age": 38, "occupation": "Software-Unternehmerin"},
     ],
+    # Company-side occupations only — Betriebsrat is employee representation (7.3.2).
     "unternehmen": [
-        {"first": "Ralf", "last": "Meissner", "age": 49, "occupation": "Betriebsratsvorsitzender"},
+        {"first": "Ralf", "last": "Meissner", "age": 49, "occupation": "Betriebsleiter"},
         {"first": "Silke", "last": "Horn", "age": 43, "occupation": "Personalchefin"},
         {"first": "Gero", "last": "Lang", "age": 56, "occupation": "Logistikleiter"},
+    ],
+    "betriebsrat": [
+        {"first": "Heike", "last": "Braun", "age": 48, "occupation": "Betriebsratsvorsitzende"},
+        {"first": "Udo", "last": "Kranz", "age": 55, "occupation": "Betriebsrat"},
+        {"first": "Maja", "last": "Vogel", "age": 41, "occupation": "Personalrätin"},
     ],
     "rentner": [
         {"first": "Helga", "last": "Pohl", "age": 71, "occupation": "Rentnerin"},
@@ -912,9 +934,14 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
         "Studenten",
         "Unternehmer",
         "Unternehmen",
+        "Wirtschaftsexperten",
+        "Wirtschaftsexperte",
         "Ökonomen",
         "Oekonomen",
         "Ökonom",
+        "Arbeitsmarkt",
+        "Betriebsrat",
+        "Betriebsräte",
         "Rentner",
         "Bürgern",
         "Bürger",
@@ -936,8 +963,11 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
     # Stable appearance order; word-boundary so «Politik» ≠ prefix of «Politiker».
     found: list[tuple[int, str]] = []
     for role in lexicon:
+        # Optional weak German endings so «Arbeitnehmern» / «Unternehmern»
+        # keep appearance order vs. nominative «Wirtschaftsexperten» (7.3.2).
         pat = re.compile(
-            rf"(?<![A-Za-zÄÖÜäöüß]){re.escape(role.lower())}(?![A-Za-zÄÖÜäöüß])",
+            rf"(?<![A-Za-zÄÖÜäöüß]){re.escape(role.lower())}"
+            rf"(?:en|n|e|s|es)?(?![A-Za-zÄÖÜäöüß])",
             flags=re.IGNORECASE,
         )
         m = pat.search(lower)
@@ -1034,6 +1064,9 @@ def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
             "rentner",
             "selbststaendige",
             "oekonomen",
+            "arbeitsmarkt",
+            "wirtschaftsexperten",
+            "betriebsrat",
         }
     )
     tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9-]{3,}", scenario or "")
@@ -1123,6 +1156,56 @@ def _bind_measure(persona: dict[str, str], measure: str) -> dict[str, str]:
     return out
 
 
+def _role_family(key: str) -> str:
+    """Collapse near-duplicate stakeholder keys (Unternehmer/Unternehmen, …)."""
+    k = _role_key(key)
+    if k in {"unternehmer", "unternehmern", "unternehmen"}:
+        return "company"
+    if k in {
+        "oekonom",
+        "oekonomen",
+        "wirtschaftsexperten",
+        "wirtschaftsexperte",
+        "arbeitsmarkt",
+    }:
+        return "economist"
+    if k in {"politiker", "politik"}:
+        return "politics"
+    if k in {"buerger", "buergern", "burger"}:
+        return "citizen"
+    if k in {"betriebsrat", "betriebsraete", "betriebsräte"}:
+        return "works_council"
+    return k
+
+
+def _pad_roles_for_domain(
+    roles: list[str],
+    *,
+    domain: str,
+    target: int,
+) -> list[str]:
+    """Fill missing seats with domain stakeholders before Moderator archetypes."""
+    if target <= len(roles):
+        return roles[:target]
+    if domain == "income":
+        pad = _DEFAULT_STAKEHOLDERS_INCOME
+    elif domain == "labor":
+        pad = _DEFAULT_STAKEHOLDERS_LABOR
+    else:
+        pad = _DEFAULT_STAKEHOLDERS
+    out = list(roles)
+    seen_families = {_role_family(r) for r in out}
+    for role in pad:
+        if len(out) >= target:
+            break
+        fam = _role_family(role)
+        if fam in seen_families:
+            continue
+        out.append(role)
+        seen_families.add(fam)
+    return out
+
+
 def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
     if domain == "income":
         table = dict(_ROLE_PERSONAS_INCOME)
@@ -1134,8 +1217,10 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
         table = dict(_ROLE_PERSONAS_LABOR)
         table["buerger"] = dict(table["bürger"])
         table["oekonomen"] = dict(table["oekonomen"])
-        # Stakeholder plural from prompts («Wirtschaftsexperten»).
+        # Stakeholder plural / Arbeitsmarkt cue → Wirtschaftsexperte (7.3.2).
         table["wirtschaftsexperten"] = dict(table["wirtschaftsexperten"])
+        table["arbeitsmarkt"] = dict(table["oekonomen"])
+        table["betriebsrat"] = dict(table["betriebsrat"])
         return table
     if domain == "mobility":
         table = dict(_ROLE_PERSONAS_MOBILITY)
@@ -1312,8 +1397,10 @@ def generate_dynamic_agents(
     """
     n = max(1, min(int(count), int(max_agents), MAX_GENERATABLE_AGENTS))
     domain = detect_topic_domain(scenario)
-    # Stakeholder roles first; remainder filled by archetypes (deterministic).
+    # Stakeholder roles first; pad with domain defaults before abstract archetypes
+    # so labor debates get Wirtschaftsexperte — not Moderator (Phase 7.3.2).
     roles = extract_stakeholder_roles(scenario, limit=min(n, 12))
+    roles = _pad_roles_for_domain(roles, domain=domain, target=n)
     keywords = extract_scenario_keywords(scenario)
     topic = _topic_phrase(keywords)
     measure = measure_label(scenario, domain)
@@ -1333,6 +1420,9 @@ def generate_dynamic_agents(
             # Prefer canonical key used by individual pools.
             if role_key not in _INDIVIDUALS_BY_ROLE and persona.get("slug"):
                 role_key = _role_key(str(persona["slug"]))
+            # Canon aliases (Arbeitsmarkt→Ökonomen) must hit the economist pool.
+            if role_key == "arbeitsmarkt":
+                role_key = "oekonomen"
             indiv = _pick_individual(role_key, scenario=short, agent_id=i)
             first = str(indiv["first"])
             last = str(indiv["last"])
