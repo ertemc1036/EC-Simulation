@@ -85,46 +85,64 @@ def test_position_tracker_change_and_influence():
         {"agent_id": 1, "goal": "Dagegen: Autoverbot ablehnen."},
     ]
     tracker.seed_from_goals(agents, step=0)
-    # Round 1 statements
+    # Round 1: establish Erstpositionen (not changes).
     tracker.update_from_snapshot(
         agents=agents,
         posts=[
-            {"post_id": 1, "user_id": 0, "content": "Ich unterstütze das Verbot klar."}
+            {"post_id": 1, "user_id": 0, "content": "Ich unterstütze das Verbot klar."},
+            {
+                "post_id": 2,
+                "user_id": 1,
+                "content": "Ich lehne das Verbot ab — dagegen.",
+            },
         ],
         comments=[],
         reactions=[],
         step=1,
     )
-    # Round 2: agent 1 reacts then changes mind after interaction
+    assert tracker.positions_payload()["change_count"] == 0
+    # Round 2: agent 1 changes mind after evidenced interaction with agent 0.
     changes = tracker.update_from_snapshot(
         agents=agents,
         posts=[
-            {"post_id": 1, "user_id": 0, "content": "Ich unterstütze das Verbot klar."}
+            {"post_id": 1, "user_id": 0, "content": "Ich unterstütze das Verbot klar."},
+            {
+                "post_id": 2,
+                "user_id": 1,
+                "content": "Ich lehne das Verbot ab — dagegen.",
+            },
         ],
         comments=[
             {
                 "comment_id": 2,
                 "post_id": 1,
+                "user_id": 0,
+                "content": "Belege für Luftqualität im Ring.",
+            },
+            {
+                "comment_id": 3,
+                "post_id": 1,
                 "user_id": 1,
                 "content": (
-                    "→Kommentar#2 war falsch — ich ändere meine Position und "
+                    "→Kommentar#2 — ich ändere meine Position und "
                     "werde überzeugt vom Verbot."
                 ),
-            }
+            },
         ],
         reactions=[
-            {"type": "like", "user_id": 1, "post_id": 1},
+            {"type": "like", "user_id": 1, "comment_id": 2},
         ],
         step=2,
     )
-    assert any(c["agent_id"] == 1 for c in changes) or any(
-        p.get("changed") for p in tracker.positions_payload()["positions"]
-    )
+    assert any(c["agent_id"] == 1 for c in changes)
+    assert tracker.positions_payload()["change_count"] == 1
     specs = tracker.social_edge_specs()
     relations = {s["relation"] for s in specs}
     assert "position_changed" in relations
     # influenced_by only when change + interaction with another actor
     assert any(s["relation"] == "influenced_by" for s in specs)
+    infl = [s for s in specs if s["relation"] == "influenced_by"]
+    assert infl[0]["target"] == "actor:0"
 
 
 def test_knowledge_graph_social_edges_only_evidenced():

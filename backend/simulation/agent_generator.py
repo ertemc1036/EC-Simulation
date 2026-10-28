@@ -107,6 +107,18 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
         ),
         "style": "abwägend, öffentlichkeitsorientiert, strategisch",
     },
+    "politik": {
+        "name": "Politikstimme",
+        "slug": "politik",
+        "description": "Wägt Mehrheiten, Recht und Umsetzbarkeit ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "zwischen Bürgerwünschen und Betriebs-/Kostengrenzen, ohne eine Seite "
+            "komplett zu übernehmen."
+        ),
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
     "verkehrsbetriebe": {
         "name": "Verkehrsbetrieb",
         "slug": "verkehrsbetriebe",
@@ -279,47 +291,123 @@ _WEAK_LEAD = frozenset(
 )
 
 
+# Canonical display names for known stakeholder groups (incl. declined forms).
+_ROLE_CANON: dict[str, str] = {
+    "buerger": "Bürger",
+    "buergern": "Bürger",
+    "burger": "Bürger",
+    "unternehmen": "Unternehmen",
+    "politiker": "Politiker",
+    "politik": "Politik",
+    "verkehrsbetriebe": "Verkehrsbetriebe",
+    "anwohnende": "Anwohnende",
+    "anwohner": "Anwohnende",
+    "handel": "Handel",
+    "gewerbe": "Gewerbe",
+    "behoerden": "Behörden",
+    "behörden": "Behörden",
+    "verwaltung": "Verwaltung",
+    "polizei": "Polizei",
+    "taxi": "Taxi",
+    "lieferdienste": "Lieferdienste",
+}
+
+_DEFAULT_STAKEHOLDERS = ("Bürger", "Unternehmen", "Politik")
+
+# Instruction / test-prompt stems that must never become agent names.
+_INSTRUCTION_STEMS = (
+    "untersuch",
+    "simulier",
+    "reagier",
+    "entsteht",
+    "zustimmung",
+    "widerspruch",
+    "argument",
+    "beeinfluss",
+    "ursprung",
+    "positionen",
+    "kompromiss",
+    "entwickeln",
+    "kontrovers",
+    "debatte",
+    "akteure",
+    "konkret",
+    "tragfahig",
+    "tragfähig",
+    "gemeinsam",
+    "obzustimmung",
+    "aufkonkret",
+)
+
+
+def _role_key(raw: str) -> str:
+    return (
+        raw.lower()
+        .replace("ü", "ue")
+        .replace("ö", "oe")
+        .replace("ä", "ae")
+        .replace("ß", "ss")
+    )
+
+
+def _is_instruction_fragment(token: str) -> bool:
+    """Reject sentence fragments glued from test instructions as role names."""
+    cleaned = (token or "").strip()
+    if len(cleaned) < 3:
+        return True
+    if len(cleaned) > 28:
+        return True
+    # CamelCase / glued multi-word leftovers after stripping spaces.
+    if re.search(r"[a-zäöüß][A-ZÄÖÜ]", cleaned):
+        return True
+    low = _role_key(cleaned)
+    if low in _ROLE_CANON:
+        return False
+    if any(stem in low for stem in _INSTRUCTION_STEMS):
+        return True
+    # Multiple lowercase "words" glued without separators → prompt debris.
+    if len(cleaned) >= 18 and cleaned.islower():
+        return True
+    return False
+
+
 def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
     """Pull named stakeholder groups from the scenario text.
 
-    Handles patterns like «Wie reagieren Bürger, Unternehmen, Politiker und
-    Verkehrsbetriebe?» and bare role lists.
+    Prefers lexicon hits (Bürger / Unternehmen / Politik) over free-text
+    lists so test-instruction clauses never become agent names.
     """
     text = scenario or ""
     roles: list[str] = []
     seen: set[str] = set()
 
-    def _add(raw: str) -> None:
+    def _add(raw: str) -> bool:
         cleaned = re.sub(r"[^\wÄÖÜäöüß\-]+", "", raw, flags=re.UNICODE).strip("-")
         if len(cleaned) < 3:
-            return
-        key = cleaned.lower().replace("ü", "ue").replace("ö", "oe").replace("ä", "ae")
+            return False
+        key = _role_key(cleaned)
+        # Decline / alias → canonical display name when known.
+        if key in _ROLE_CANON:
+            cleaned = _ROLE_CANON[key]
+            key = _role_key(cleaned)
+        elif _is_instruction_fragment(cleaned):
+            return False
         if key in _STOP or key in seen:
-            return
+            return False
+        if key not in _ROLE_CANON and _is_instruction_fragment(cleaned):
+            return False
         seen.add(key)
         roles.append(cleaned)
+        return True
 
-    # «reagieren A, B, C und D» / «react A, B and C»
-    for match in re.finditer(
-        r"(?:reagieren|reaktion(?:en)?\s+(?:von|der|des)?|betroffen(?:e|en)?|"
-        r"stimmen\s+(?:von|der)|akteure?(?:\s+sind)?|stakeholders?(?:\s+are)?|"
-        r"react(?:s|ion)?(?:\s+of)?)\s*[:\s]+(.+?)(?:\?|$|\.)",
-        text,
-        flags=re.IGNORECASE | re.DOTALL,
-    ):
-        chunk = match.group(1)
-        parts = re.split(r"\s*(?:,|/|;|\bund\b|\boder\b|\band\b|\bor\b)\s*", chunk)
-        for part in parts:
-            _add(part)
-            if len(roles) >= limit:
-                return roles[:limit]
-
-    # Known role lexicon hits anywhere in the scenario (order of appearance).
+    # 1) Lexicon first — order of appearance in the scenario.
     lexicon = [
+        "Bürgern",
         "Bürger",
         "Buerger",
         "Unternehmen",
         "Politiker",
+        "Politik",
         "Verkehrsbetriebe",
         "Anwohnende",
         "Anwohner",
@@ -332,8 +420,62 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
         "Lieferdienste",
     ]
     lower = text.lower()
+    # Stable appearance order; word-boundary so «Politik» ≠ prefix of «Politiker».
+    found: list[tuple[int, str]] = []
     for role in lexicon:
-        if role.lower() in lower:
+        pat = re.compile(
+            rf"(?<![A-Za-zÄÖÜäöüß]){re.escape(role.lower())}(?![A-Za-zÄÖÜäöüß])",
+            flags=re.IGNORECASE,
+        )
+        m = pat.search(lower)
+        if m:
+            found.append((m.start(), role))
+    found.sort(key=lambda x: x[0])
+    for _idx, role in found:
+        _add(role)
+        if len(roles) >= limit:
+            return roles[:limit]
+
+    # 2) «zwischen A, B und C» stakeholder lists (common in DE prompts).
+    for match in re.finditer(
+        r"zwischen\s+(.+?)(?:\.|\?|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        chunk = match.group(1)
+        # Stop at clause verbs that start instruction tails.
+        chunk = re.split(
+            r"\b(?:untersuche|simuliere|prüfe|analysiere)\b",
+            chunk,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        parts = re.split(r"\s*(?:,|/|;|\bund\b|\boder\b|\band\b|\bor\b)\s*", chunk)
+        for part in parts:
+            _add(part)
+            if len(roles) >= limit:
+                return roles[:limit]
+
+    # 3) Tight role-list cues only («Wie reagieren A, B und C?» / «Akteure sind: …»).
+    # Bare «Akteure …» is intentionally excluded — it matched instruction prose
+    # in live run fbcc32b2 («Akteure auf konkrete Argumente …»).
+    for match in re.finditer(
+        r"(?:wie\s+reagieren|reaktion(?:en)?\s+(?:von|der|des)|"
+        r"stimmen\s+(?:von|der)|akteure?\s+sind|stakeholders?\s+are|"
+        r"react(?:s|ion)?\s+of)\s*[:\s]+(.+?)(?:\?|$|\.)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        chunk = match.group(1)
+        parts = re.split(r"\s*(?:,|/|;|\bund\b|\boder\b|\band\b|\bor\b)\s*", chunk)
+        for part in parts:
+            _add(part)
+            if len(roles) >= limit:
+                return roles[:limit]
+
+    # 4) Deterministic fallbacks when the prompt only names the debate topic.
+    if not roles:
+        for role in _DEFAULT_STAKEHOLDERS:
             _add(role)
             if len(roles) >= limit:
                 break
@@ -355,9 +497,11 @@ def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
     role_norms.update(
         {
             "buerger",
+            "buergern",
             "burger",
             "unternehmen",
             "politiker",
+            "politik",
             "verkehrsbetriebe",
             "anwohnende",
             "handel",
