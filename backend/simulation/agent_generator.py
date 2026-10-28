@@ -1820,7 +1820,7 @@ def generate_dynamic_agents(
         if user_name in used_user_names:
             user_name = f"{user_name}_{i}"
 
-        # Phase 8.3 — Persona Motivation Engine V4.
+        # Phase 8.5 — Stakeholder Motivation Engine V5.
         motivation = build_persona_motivation(
             role_label=role_label,
             occupation=occupation,

@@ -1,8 +1,8 @@
-"""Phase 8.0–8.4 — Simulation Intelligence (scaling + debate + reliability).
+"""Phase 8.0–8.5 — Simulation Intelligence (scaling + realistic multi-agent).
 
-Aggregates persona motivation V4, scheduler coverage/waves-in-execution,
-cost plan V3, interaction engine, debate quality V2, stance V4, opinion V4,
-argument-grounded interaction V4, and interaction quality V4. No provider calls.
+Aggregates Stakeholder Motivation V5, Claim-Based Interaction V4,
+Argument Evolution V4, Interaction Quality V5, scheduler coverage,
+cost plan, stance V4, opinion V4. No provider calls.
 """
 from __future__ import annotations
 
@@ -20,14 +20,15 @@ from backend.config import (
 from backend.simulation.cost_token_planner import CostTokenPlan
 
 
-QUALITY_FIX = "8.4"
-PERSONA_ENGINE = "v4"
+QUALITY_FIX = "8.5"
+PERSONA_ENGINE = "v5"
 DEBATE_ENGINE = "v2"
 STANCE_CLASSIFIER = "v4"
 OPINION_ENGINE = "v4"
-ARGUMENT_ENGINE = "v2"
+ARGUMENT_ENGINE = "v4"
 GROUNDED_ENGINE = "v4"
-INTERACTION_QUALITY_ENGINE = "v4"
+CLAIM_ENGINE = "v4"
+INTERACTION_QUALITY_ENGINE = "v5"
 
 
 def _unique_occupations(agents: list[dict[str, Any]]) -> int:
@@ -72,7 +73,6 @@ def _role_balance(agents: list[dict[str, Any]]) -> float:
     if k <= 1:
         return 1.0 if n <= 1 else 0.0
     ideal = n / k
-    # Mean absolute deviation from ideal, normalized.
     mad = sum(abs(c - ideal) for c in counts.values()) / n
     return round(max(0.0, 1.0 - mad), 4)
 
@@ -93,14 +93,12 @@ def _persona_issues(agents: list[dict[str, Any]]) -> list[str]:
         role = str(a.get("role_label") or "").strip().lower()
         name = str(a.get("name") or "")
         if " " in occ and any(ch.isdigit() is False and ord(ch) < 128 for ch in occ):
-            # "lehrkr ften" style ascii hole from stripped umlauts
             if "  " in occ or "kr f" in occ or occ.endswith(" ften"):
                 issues.append(f"broken_occupation:{a.get('agent_id')}")
         if occ in topicish or role in topicish:
             issues.append(f"topic_as_stakeholder:{a.get('agent_id')}")
         if occ == role and occ in {"eltern", "lehrkraeften", "lehrkräften"}:
             issues.append(f"group_label_as_occupation:{a.get('agent_id')}")
-        # Duplicate first/last like "Noa Noa"
         parts = name.split()
         if len(parts) >= 2 and parts[0].lower() == parts[1].lower():
             issues.append(f"duplicate_name_token:{a.get('agent_id')}")
@@ -128,7 +126,7 @@ def build_simulation_intelligence(
     opinion_dynamics: dict[str, Any] | None = None,
     interaction_quality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compact Phase-8.3 intelligence snapshot for status + result JSON."""
+    """Compact Phase-8.5 intelligence snapshot for status + result JSON."""
     agents = agents or []
     n = max(1, int(agent_count) or len(agents) or 1)
     issues = _persona_issues(agents)
@@ -191,10 +189,15 @@ def build_simulation_intelligence(
         else max(0.0, 1.0 - unclear_share)
     )
     grounded = iq.get("argument_grounded") or disc.get("argument_grounded") or {}
+    claims = iq.get("claim_based_interaction") or disc.get("claim_based_interaction") or {}
+    evo = arg_intel.get("argument_evolution") or {}
     mot_cov = float(
         (iq.get("components") or {}).get("persona_motivation_coverage")
         or (opinion.get("motivation_coverage") or 0.0)
         or 0.0
+    )
+    stake_cov = float(
+        (iq.get("components") or {}).get("stakeholder_stake_coverage") or 0.0
     )
     if mot_cov <= 0.0:
         with_mot = sum(
@@ -204,6 +207,14 @@ def build_simulation_intelligence(
             or "Motivation:" in str(a.get("goal") or "")
         )
         mot_cov = round(with_mot / max(1, len(agents) or 1), 4)
+    if stake_cov <= 0.0:
+        with_stakes = sum(
+            1
+            for a in agents
+            if (a.get("motivation") or {}).get("stakes")
+            or (a.get("motivation") or {}).get("claim_agenda")
+        )
+        stake_cov = round(with_stakes / max(1, len(agents) or 1), 4)
 
     return {
         "phase": 8,
@@ -214,6 +225,7 @@ def build_simulation_intelligence(
         "opinion_engine": opinion.get("engine") or OPINION_ENGINE,
         "argument_engine": arg_intel.get("engine") or ARGUMENT_ENGINE,
         "argument_grounded_engine": grounded.get("engine") or GROUNDED_ENGINE,
+        "claim_based_engine": claims.get("engine") or CLAIM_ENGINE,
         "interaction_quality_engine": iq.get("engine") or INTERACTION_QUALITY_ENGINE,
         "backend": "local",
         "execution_kind": execution_kind,
@@ -227,6 +239,7 @@ def build_simulation_intelligence(
             "role_balance": balance,
             "diversity_score": diversity,
             "motivation_coverage": mot_cov,
+            "stake_coverage": stake_cov,
             "issue_flags": issues,
             "issue_count": len(issues),
             "ok": len(issues) == 0 and role_n >= min(3, n) and name_n == len(agents),
@@ -264,8 +277,11 @@ def build_simulation_intelligence(
             "mean_argument_quality": arg_intel.get("mean_quality_score", 0.0),
             "argument_diversity": arg_intel.get("argument_diversity", 0.0),
             "claim_kinds": arg_intel.get("claim_kinds") or {},
+            "evolution_rate": evo.get("evolution_rate") or arg_intel.get("evolution_rate"),
+            "evolution_score": evo.get("score") or arg_intel.get("evolution_score"),
             "grounded_reply_rate": grounded.get("grounded_reply_rate"),
             "invented_attribution_rate": grounded.get("invented_attribution_rate"),
+            "claim_address_rate": claims.get("claim_address_rate"),
         },
         "stance": {
             "classifier": positions.get("stance_classifier") or STANCE_CLASSIFIER,
@@ -278,7 +294,7 @@ def build_simulation_intelligence(
         },
         "opinion": {
             "engine": opinion.get("engine") or OPINION_ENGINE,
-            "version": opinion.get("version", 3),
+            "version": opinion.get("version", 4),
             "stance_clarity": stance_clarity,
             "stability_index": opinion.get("stability_index"),
             "polarization": opinion.get("polarization"),
@@ -319,6 +335,7 @@ def build_simulation_intelligence(
             "persona_diversity": diversity,
             "persona_issues": len(issues),
             "persona_motivation_coverage": mot_cov,
+            "stakeholder_stake_coverage": stake_cov,
             "scheduler_self_hits": int(sched.get("self_as_partner_count") or 0),
             "waves_executed": waves_executed,
             "planned_waves": int(plan.get("planned_waves") or waves_planned or 0),
@@ -329,18 +346,20 @@ def build_simulation_intelligence(
             "debate_quality_score": debate_score,
             "argument_diversity": float(arg_intel.get("argument_diversity") or 0.0),
             "mean_argument_quality": float(arg_intel.get("mean_quality_score") or 0.0),
+            "argument_evolution_score": float(evo.get("score") or 0.0),
             "opinion_stability": float(opinion.get("stability_index") or 0.0),
             "grounded_reply_rate": float(grounded.get("grounded_reply_rate") or 0.0),
             "invented_attribution_rate": float(
                 grounded.get("invented_attribution_rate") or 0.0
             ),
             "weak_overlap_rate": float(grounded.get("weak_overlap_rate") or 0.0),
+            "claim_address_rate": float(claims.get("claim_address_rate") or 0.0),
             "interaction_quality_score": float(iq.get("score") or 0.0),
         },
         "note": (
-            "Simulation Intelligence (Phase 8.4): Persona Motivation V4, "
-            "Argument-Grounded Interaction V4, Stance Classification V4, "
-            "Opinion Dynamics V4, Interaction Quality V4 — offline; "
-            "Live-Ceilings unverändert; paid_llm_unlocked=false."
+            "Simulation Intelligence (Phase 8.5): Stakeholder Motivation V5, "
+            "Claim-Based Interaction V4, Argument Evolution V4, "
+            "Interaction Quality V5 — offline; Live-Ceilings unverändert; "
+            "paid_llm_unlocked=false."
         ),
     }

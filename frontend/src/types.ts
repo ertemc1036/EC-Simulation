@@ -326,6 +326,14 @@ export interface InteractionQualitySnapshot {
     overlap_floor?: number
     reply_count?: number
   }
+  claim_based_interaction?: {
+    engine?: string
+    claim_address_rate?: number
+    mean_claim_coverage?: number
+    claim_count?: number
+    claims_addressed?: number
+    reply_count?: number
+  }
   persona_motivation?: Record<string, unknown>
   note?: string
 }
@@ -351,6 +359,16 @@ export interface ArgumentIntelligenceSnapshot {
   claim_kinds?: Record<string, number>
   top_themes?: Array<{ theme: string; count: number }>
   repetition_blocks?: number
+  evolution_rate?: number
+  evolution_score?: number
+  argument_evolution?: {
+    engine?: string
+    score?: number
+    evolution_rate?: number
+    refined_claim_share?: number
+    challenge_chain_count?: number
+    stage_counts?: Record<string, number>
+  }
   arguments?: Array<Record<string, unknown>>
   note?: string
 }
@@ -407,6 +425,7 @@ export interface SimulationIntelligence {
   opinion_engine?: string
   argument_engine?: string
   argument_grounded_engine?: string
+  claim_based_engine?: string
   interaction_quality_engine?: string
   paid_llm_unlocked?: boolean
   persona?: {
@@ -418,6 +437,7 @@ export interface SimulationIntelligence {
     unique_names?: number
     role_balance?: number
     motivation_coverage?: number
+    stake_coverage?: number
     ok?: boolean
   }
   scheduler?: Record<string, unknown>

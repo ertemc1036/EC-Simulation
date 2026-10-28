@@ -26,7 +26,7 @@ MAX_GLOBAL_ARGUMENTS = 48
 MAX_THREAD_EVENTS = 80
 ARGUMENT_FP_CHARS = 160
 PROMPT_HINT_CHARS = 220
-QUALITY_FIX = "8.4"
+QUALITY_FIX = "8.5"
 DEBATE_ENGINE = "v2"
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
@@ -464,6 +464,6 @@ class DiscussionEngine:
                 "Debate Engine V2 (Phase 8.2/8.3): Argument-History + Claim-Intelligence "
                 "+ Quality-Score. Threads aus lokalen →Kommentar#-Refs. "
                 "OASIS: kein parent_comment_id. Keine erfundenen Quellen. "
-                "Interaction Quality / Argument-Grounded V3 werden vom Engine angehängt."
+                "Claim-Based Interaction V4 / Argument Evolution V4 / IQ V5 werden vom Engine angehängt."
             ),
         }

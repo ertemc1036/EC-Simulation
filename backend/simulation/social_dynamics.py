@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 STANCE_CLASSIFIER = "v4"
-STANCE_QUALITY_FIX = "8.4"
+STANCE_QUALITY_FIX = "8.5"
 
 # Phase-5 social relations — only emit when evidenced.
 SOCIAL_RELATIONS = frozenset(

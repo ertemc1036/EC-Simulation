@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-QUALITY_FIX = "8.4"
+QUALITY_FIX = "8.5"
 OPINION_ENGINE = "v4"
 
 # Polarities that dilute stance clarity (unknown-like for Opinion V4).

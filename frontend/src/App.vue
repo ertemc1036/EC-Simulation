@@ -1068,7 +1068,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <h3>Quality Dashboard V4</h3>
+      <h3>Quality Dashboard V5</h3>
       <div class="society-grid" v-if="debateQuality || argumentIntelligence || simulationIntelligence">
         <div>
           <span class="k">Interaction Quality</span>
@@ -1077,6 +1077,10 @@ onUnmounted(() => {
         <div>
           <span class="k">Grounded Reply %</span>
           <span class="v mono">{{ sim?.interaction_quality?.argument_grounded?.grounded_reply_rate ?? simulationIntelligence?.kpis?.grounded_reply_rate ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Claim Address %</span>
+          <span class="v mono">{{ sim?.interaction_quality?.claim_based_interaction?.claim_address_rate ?? simulationIntelligence?.kpis?.claim_address_rate ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Weak Overlap %</span>
@@ -1095,12 +1099,20 @@ onUnmounted(() => {
           <span class="v mono">{{ argumentIntelligence?.argument_diversity ?? simulationIntelligence?.kpis?.argument_diversity ?? '—' }}</span>
         </div>
         <div>
+          <span class="k">Arg. Evolution</span>
+          <span class="v mono">{{ argumentIntelligence?.evolution_score ?? argumentIntelligence?.argument_evolution?.score ?? simulationIntelligence?.kpis?.argument_evolution_score ?? '—' }}</span>
+        </div>
+        <div>
           <span class="k">Mean Arg. Quality</span>
           <span class="v mono">{{ argumentIntelligence?.mean_quality_score ?? simulationIntelligence?.kpis?.mean_argument_quality ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Motivation Coverage</span>
           <span class="v mono">{{ simulationIntelligence?.persona?.motivation_coverage ?? simulationIntelligence?.kpis?.persona_motivation_coverage ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Stake Coverage</span>
+          <span class="v mono">{{ simulationIntelligence?.persona?.stake_coverage ?? simulationIntelligence?.kpis?.stakeholder_stake_coverage ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Opinion Stability</span>

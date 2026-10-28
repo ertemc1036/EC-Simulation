@@ -1,7 +1,8 @@
-"""Phase 8.2 — Argument Intelligence V2 (offline-safe, no provider calls).
+"""Phase 8.2–8.5 — Argument Intelligence + Argument Evolution V4.
 
-Classifies claim kinds, scores argument quality, and summarizes debate
-argument diversity. Used by Debate Engine V2 / DiscussionEngine snapshots.
+V2: claim kinds, quality scores, diversity.
+V4: argument evolution across rounds (introduce → support/develop →
+challenge → refine). Offline lexical heuristics — no provider calls.
 """
 from __future__ import annotations
 
@@ -26,8 +27,8 @@ def _claims_invented_source(text: str) -> bool:
 
     return claims_invented_source(text)
 
-QUALITY_FIX = "8.4"
-ARGUMENT_ENGINE = "v2"
+QUALITY_FIX = "8.5"
+ARGUMENT_ENGINE = "v4"
 
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{4,}", re.IGNORECASE)
 
@@ -86,6 +87,32 @@ _ACK = (
     "teile diese",
     "wertvoll",
 )
+_REFINE = (
+    "präzisieren",
+    "einschränken",
+    "unter der bedingung",
+    "nur schrittweise",
+    "pilot zuerst",
+    "ergänzend",
+    "zusätzlich",
+    "ferner",
+    "zugleich",
+    "konkret heißt",
+)
+
+# Claim-kind → evolution stage
+_KIND_TO_STAGE = {
+    "statement": "introduce",
+    "support": "support",
+    "acknowledgment": "support",
+    "conditional_claim": "refine",
+    "caveat": "refine",
+    "evidence_demand": "challenge",
+    "rebuttal": "challenge",
+    "develop": "develop",
+    "address": "develop",
+    "empty": "empty",
+}
 
 
 def classify_claim_kind(text: str) -> str:
@@ -100,17 +127,18 @@ def classify_claim_kind(text: str) -> str:
     evid = sum(1 for m in _EVIDENCE_DEMAND if m in low)
     caveat = sum(1 for m in _CAVEAT if m in low)
     support = sum(1 for m in _SUPPORT if m in low)
+    refine = sum(1 for m in _REFINE if m in low)
     if refs and "disagrees_with" in labels:
         return "rebuttal"
     if rebut and refs:
         return "rebuttal"
-    if refs and ack and (caveat or evid or support):
+    if refs and ack and (caveat or evid or support or refine):
         return "develop"
-    if refs and ack and not (caveat or evid or support or rebut):
+    if refs and ack and not (caveat or evid or support or rebut or refine):
         return "acknowledgment"
     if evid >= 2 or (evid and caveat):
         return "evidence_demand"
-    if caveat and support:
+    if (caveat and support) or (refine and (caveat or support)):
         return "conditional_claim"
     if caveat and not support:
         return "caveat"
@@ -121,6 +149,11 @@ def classify_claim_kind(text: str) -> str:
     if refs:
         return "address"
     return "statement"
+
+
+def classify_evolution_stage(text: str, *, claim_kind: str | None = None) -> str:
+    kind = claim_kind or classify_claim_kind(text)
+    return _KIND_TO_STAGE.get(kind, "introduce")
 
 
 def _theme_tokens(text: str, *, limit: int = 8) -> list[str]:
@@ -244,12 +277,14 @@ def score_argument(
 
 
 def enrich_argument_record(rec: dict[str, Any], *, text: str | None = None) -> dict[str, Any]:
-    """Attach V2 claim metadata onto an argument dict (non-destructive copy)."""
+    """Attach V4 claim + evolution metadata onto an argument dict."""
     snippet = text or str(rec.get("snippet") or "")
     kind = classify_claim_kind(snippet)
+    stage = classify_evolution_stage(snippet, claim_kind=kind)
     themes = _theme_tokens(snippet)
     out = dict(rec)
     out["claim_kind"] = kind
+    out["evolution_stage"] = stage
     out["themes"] = themes
     out["quality_score"] = score_argument(
         snippet,
@@ -261,6 +296,97 @@ def enrich_argument_record(rec: dict[str, Any], *, text: str | None = None) -> d
     return out
 
 
+def _theme_key(themes: list[str]) -> str:
+    if not themes:
+        return ""
+    return "|".join(sorted(themes[:3]))
+
+
+def build_argument_evolution(
+    *,
+    enriched: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Track how claim themes evolve across chronological arguments (V4)."""
+    stages = Counter(str(a.get("evolution_stage") or "introduce") for a in enriched)
+    # Theme trajectories: first stage → later stages for same theme key.
+    theme_history: dict[str, list[str]] = {}
+    for a in enriched:
+        key = _theme_key(list(a.get("themes") or []))
+        if not key:
+            continue
+        theme_history.setdefault(key, []).append(
+            str(a.get("evolution_stage") or "introduce")
+        )
+
+    evolved = 0
+    stagnant = 0
+    challenge_chains = 0
+    refine_chains = 0
+    for stages_list in theme_history.values():
+        unique = set(stages_list)
+        if len(stages_list) >= 2 and len(unique) >= 2:
+            evolved += 1
+            if "challenge" in unique and (
+                "introduce" in unique or "support" in unique or "develop" in unique
+            ):
+                challenge_chains += 1
+            if "refine" in unique or "develop" in unique:
+                refine_chains += 1
+        elif len(stages_list) >= 2:
+            stagnant += 1
+
+    n_themes = max(1, len(theme_history))
+    evolution_rate = round(evolved / n_themes, 4) if theme_history else 0.0
+    stagnant_share = round(stagnant / n_themes, 4) if theme_history else 0.0
+    refine_share = round(
+        (
+            int(stages.get("refine") or 0)
+            + int(stages.get("develop") or 0)
+        )
+        / max(1, len(enriched)),
+        4,
+    )
+    challenge_share = round(
+        int(stages.get("challenge") or 0) / max(1, len(enriched)),
+        4,
+    )
+    # Composite evolution score for IQ V5.
+    score = round(
+        max(
+            0.0,
+            min(
+                1.0,
+                0.40 * evolution_rate
+                + 0.25 * refine_share
+                + 0.20 * min(1.0, challenge_chains / max(1.0, float(n_themes)))
+                + 0.15 * (1.0 - stagnant_share),
+            ),
+        ),
+        4,
+    )
+    return {
+        "backend": "local",
+        "engine": ARGUMENT_ENGINE,
+        "quality_fix": QUALITY_FIX,
+        "theme_tracks": len(theme_history),
+        "evolved_themes": evolved,
+        "stagnant_themes": stagnant,
+        "evolution_rate": evolution_rate,
+        "stagnant_claim_share": stagnant_share,
+        "refined_claim_share": refine_share,
+        "challenge_share": challenge_share,
+        "challenge_chain_count": challenge_chains,
+        "refine_chain_count": refine_chains,
+        "stage_counts": dict(sorted(stages.items())),
+        "score": score,
+        "ok": score >= 0.25 or len(enriched) < 3,
+        "note": (
+            "Argument Evolution V4: Themen-Trajektorien introduce→support/"
+            "develop→challenge→refine — offline."
+        ),
+    }
+
+
 def build_argument_intelligence(
     *,
     arguments: list[dict[str, Any]],
@@ -268,7 +394,7 @@ def build_argument_intelligence(
     repetition_blocks: int = 0,
     agent_count: int = 0,
 ) -> dict[str, Any]:
-    """Aggregate Argument Intelligence V2 payload for discussion / dashboard."""
+    """Aggregate Argument Intelligence V4 (+ evolution) for discussion / dashboard."""
     enriched = [enrich_argument_record(a) for a in (arguments or [])]
     kinds = Counter(str(a.get("claim_kind") or "statement") for a in enriched)
     theme_counter: Counter[str] = Counter()
@@ -300,6 +426,7 @@ def build_argument_intelligence(
         4,
     )
     invented = sum(1 for a in enriched if _claims_invented_source(str(a.get("snippet") or "")))
+    evolution = build_argument_evolution(enriched=enriched)
     return {
         "backend": "local",
         "engine": ARGUMENT_ENGINE,
@@ -319,10 +446,13 @@ def build_argument_intelligence(
         "self_replies": self_replies,
         "repetition_blocks": int(repetition_blocks or 0),
         "invented_source_flags": invented,
+        "argument_evolution": evolution,
+        "evolution_rate": evolution.get("evolution_rate"),
+        "evolution_score": evolution.get("score"),
         "arguments": enriched[-24:],
         "note": (
-            "Argument Intelligence V2: Claim-Arten, Themenvielfalt, Quality-Score — "
-            "offline lexikalisch; keine Provider-Calls."
+            "Argument Intelligence V4: Claim-Arten, Themenvielfalt, Quality-Score "
+            "+ Argument Evolution — offline lexikalisch; keine Provider-Calls."
         ),
     }
 
@@ -333,10 +463,15 @@ def debate_quality_score(
     unknown_stance_share: float = 0.0,
     polarity_distribution: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Composite Debate Quality V2 score for the dashboard."""
+    """Composite Debate Quality score (V2 formula + V4 evolution boost)."""
     mean_q = float(argument_intel.get("mean_quality_score") or 0.0)
     diversity = float(argument_intel.get("argument_diversity") or 0.0)
     address = float(argument_intel.get("address_rate") or 0.0)
+    evo = float(
+        argument_intel.get("evolution_score")
+        or (argument_intel.get("argument_evolution") or {}).get("score")
+        or 0.0
+    )
     reps = int(argument_intel.get("repetition_blocks") or 0)
     n_args = max(1, int(argument_intel.get("argument_count") or 1))
     rep_pen = min(0.4, reps / max(4.0, float(n_args)))
@@ -345,7 +480,6 @@ def debate_quality_score(
     clear = sum(int(pol.get(k) or 0) for k in ("pro", "contra", "conditional", "exception"))
     total = max(1, sum(int(v) for v in pol.values()) or 1)
     clear_share = clear / total
-    # Prefer multi-polar debate over mono-polarity echo chambers.
     nonempty = [int(v) for k, v in pol.items() if k not in {"unknown", "uncertain"} and int(v or 0) > 0]
     balance = 0.0
     if len(nonempty) >= 2:
@@ -358,12 +492,13 @@ def debate_quality_score(
             0.0,
             min(
                 1.0,
-                0.28 * mean_q
-                + 0.22 * diversity
-                + 0.18 * address
-                + 0.18 * clarity
+                0.24 * mean_q
+                + 0.18 * diversity
+                + 0.16 * address
+                + 0.16 * clarity
+                + 0.10 * evo
                 + 0.08 * clear_share
-                + 0.06 * balance
+                + 0.08 * balance
                 - rep_pen,
             ),
         ),
@@ -381,11 +516,12 @@ def debate_quality_score(
             "stance_clarity": round(clarity, 4),
             "clear_polarity_share": round(clear_share, 4),
             "polarity_balance": balance,
+            "argument_evolution": evo,
             "repetition_penalty": round(rep_pen, 4),
         },
         "ok": score >= 0.45 and clarity >= 0.5 and reps == 0,
         "note": (
-            "Debate Quality V2 aggregiert Argument-Qualität, Adressierung, "
-            "Stance-Klarheit und Wiederholungsstrafe — offline."
+            "Debate Quality V2+V4 aggregiert Argument-Qualität, Adressierung, "
+            "Stance-Klarheit, Evolution und Wiederholungsstrafe — offline."
         ),
     }

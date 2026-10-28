@@ -114,14 +114,14 @@ def test_ceilings_and_paid_flag_unchanged_phase831():
     assert cfg.max_tokens_per_run == 20000
     assert cfg.max_tokens_per_call == 500
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] in {"8.3", "8.4"}
+    assert payload["society_intelligence"]["quality_fix"] in {"8.3", "8.4", "8.5"}
 
 
 def test_scenario_a_fixture_meta_and_engines(fixture_a: dict):
     meta = fixture_a["meta"]
     assert meta["run_id"] == "20261028T145656Z-e251172c"
     assert meta["quality_fix"] == "8.3"
-    assert meta["persona_engine"] == "v4"
+    assert meta["persona_engine"] in {"v4", "v5"}
     assert detect_topic_domain(meta["scenario"]) == "education"
     assert fixture_a["agent_positions"]["stance_classifier"] == "v3"
     assert fixture_a["opinion_dynamics"]["engine"] == "v3"
@@ -155,7 +155,7 @@ def test_scenario_a_documents_false_pro_stance_gaps(fixture_a: dict):
 
 def test_scenario_a_grounding_perfect_invented_zero(fixture_a: dict):
     snap = evaluate_argument_grounded_interactions(comments=fixture_a["comments"])
-    assert snap["engine"] in {"v3", "v4"}
+    assert snap["engine"] in {"v3", "v4", "v5"}
     assert snap["reply_count"] == 3
     assert snap["grounded_reply_rate"] == 1.0
     assert snap["invented_attribution_count"] == 0
@@ -169,7 +169,7 @@ def test_scenario_a_grounding_perfect_invented_zero(fixture_a: dict):
 def test_scenario_a_motivation_and_replay_unknown_zero(fixture_a: dict):
     cov = motivation_coverage(fixture_a["agents"])
     assert cov["coverage"] == 1.0
-    assert cov["engine"] == "v4"
+    assert cov["engine"] in {"v4", "v5"}
     tracker = PositionTracker()
     tracker.update_from_snapshot(
         agents=fixture_a["agents"],
@@ -249,11 +249,11 @@ def test_offline_scenarios_b_e_scripted(results_dir: Path, key: str):
     path = st.get("result_path")
     assert path and Path(path).is_file()
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"8.3", "8.4"}
-    assert data["meta"]["persona_engine"] == "v4"
-    assert data["agent_positions"]["stance_classifier"] in {"v3", "v4"}
-    assert data["opinion_dynamics"]["engine"] in {"v3", "v4"}
-    assert data["interaction_quality"]["engine"] in {"v3", "v4"}
+    assert data["meta"]["quality_fix"] in {"8.3", "8.4", "8.5"}
+    assert data["meta"]["persona_engine"] in {"v4", "v5"}
+    assert data["agent_positions"]["stance_classifier"] in {"v3", "v4", "v5"}
+    assert data["opinion_dynamics"]["engine"] in {"v3", "v4", "v5"}
+    assert data["interaction_quality"]["engine"] in {"v3", "v4", "v5"}
     assert motivation_coverage(data["agents"])["coverage"] == 1.0
     dist = data["agent_positions"]["polarity_distribution"]
     total = sum(int(v) for v in dist.values()) or 1
