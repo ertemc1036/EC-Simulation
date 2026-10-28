@@ -356,9 +356,9 @@ def _scripted_stance_line(agent_id: int, round_n: int, *, scenario: str = "") ->
             )
         if round_n == 2:
             if bucket == 0:
-                return "stimme zu: ja zum Grundeinkommen, mit Messpunkten."
+                return f"stimme zu: ja zu {measure}, mit Messpunkten."
             if bucket == 1:
-                return "widerspreche: gegen das Grundeinkommen ohne Finanzierungsnachweis."
+                return f"widerspreche: gegen {measure} ohne Finanzierungsnachweis."
             return (
                 "einerseits Absicherung, andererseits Haushaltsgrenzen — "
                 "Pilot mit Abbruchkriterien."
@@ -435,6 +435,7 @@ def _scripted_ref_comment(
     """Local →Kommentar# content with agree/disagree/shift markers."""
     domain = detect_topic_domain(scenario) if scenario else "mobility"
     syn = synthetic_tag()
+    measure = measure_label(scenario, domain) if scenario else "die Maßnahme"
     if domain == "income":
         if round_n >= 4:
             if agent_id % 2 == 0:
@@ -445,7 +446,7 @@ def _scripted_ref_comment(
             else:
                 body = (
                     "widerspreche weiterhin: sehe das anders — "
-                    "gegen das Grundeinkommen ohne Gegenfinanzierung."
+                    f"gegen {measure} ohne Gegenfinanzierung."
                 )
         elif round_n >= 3:
             if (call_index + agent_id) % 2 == 0:
@@ -456,7 +457,7 @@ def _scripted_ref_comment(
             else:
                 body = (
                     "Ich halte dagegen und widerspreche klar — "
-                    "lehne das Grundeinkommen ab ohne Finanzierungsnachweis."
+                    f"lehne {measure} ab ohne Finanzierungsnachweis."
                 )
         else:
             if (call_index + agent_id) % 2 == 0:
@@ -467,7 +468,7 @@ def _scripted_ref_comment(
             else:
                 body = (
                     "Ich halte dagegen und widerspreche klar — "
-                    "lehne das Grundeinkommen ab ohne Gegenfinanzierung."
+                    f"lehne {measure} ab ohne Gegenfinanzierung."
                 )
     else:
         if round_n >= 4:

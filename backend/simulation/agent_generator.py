@@ -110,12 +110,22 @@ def _archetype_for_domain(arch: dict[str, str], domain: str) -> dict[str, str]:
         income_desc = {
             "historian": "Vergleicht mit früheren Sozialreformen und Transfermodellen.",
             "engineer": "Prüft Auszahlungslogistik, Verwaltungskapazität und IT-Systeme.",
-            "activist": "Drängt auf zügige Einführung ohne Verwässerung des Grundeinkommens.",
+            "activist": "Drängt auf zügige Einführung ohne Verwässerung der Maßnahme.",
             "skeptic": "Misstraut Finanzierungsannahmen und Arbeitsanreiz-Prognosen.",
             "builder": "Schlägt Piloten mit klaren Abbruchkriterien für Transfers vor.",
         }
         if slug in income_desc:
             out["description"] = income_desc[slug]
+    elif domain == "labor":
+        labor_desc = {
+            "historian": "Vergleicht mit früheren Arbeitszeit- und Tarifreformen.",
+            "engineer": "Prüft Schichtpläne, Kapazität und betriebliche Umsetzung.",
+            "activist": "Drängt auf zügige Arbeitszeitverkürzung ohne Lohnverlust.",
+            "skeptic": "Misstraut Produktivitäts- und Wettbewerbsversprechen.",
+            "builder": "Schlägt Branchenpiloten mit messbaren Produktivitätskriterien vor.",
+        }
+        if slug in labor_desc:
+            out["description"] = labor_desc[slug]
     elif domain == "mobility":
         mobility_desc = {
             "historian": "Vergleicht mit früheren Stadtentwicklungen und Politikzyklen.",
@@ -210,6 +220,8 @@ _ROLE_PERSONAS_MOBILITY: dict[str, dict[str, str]] = {
     },
 }
 
+# Income/BGE role voices — conflicts use ``{measure}`` (filled at generation).
+# Never hardcode "Grundeinkommen" into non-income paths (Phase 7.3.1).
 _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
     "bürger": {
         "name": "Bürgerstimme",
@@ -217,8 +229,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Spricht für Alltagssicherheit und Teilhabe der Bevölkerung.",
         "goal": "Existenzsicherung und Gerechtigkeit für Haushalte sichtbar machen.",
         "conflict": (
-            "Befürworte verlässliche Absicherung; widersprich Kürzungsargumenten "
-            "ohne Alltagsbezug."
+            "Befürworte verlässliche Absicherung über «{measure}»; widersprich "
+            "Kürzungsargumenten ohne Alltagsbezug."
         ),
         "style": "direkt, erfahrungsbezogen, pragmatisch",
     },
@@ -228,7 +240,7 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Vertritt abhängig Beschäftigte und Lohn-Anreiz-Fragen.",
         "goal": "Arbeitsanreize und Absicherung fair ausbalancieren.",
         "conflict": (
-            "Unterstütze Grundeinkommen als Absicherung, aber fordere klare "
+            "Unterstütze «{measure}» als Absicherung, aber fordere klare "
             "Kompatibilität mit Löhnen; lehne Modelle ab, die Vollzeit entwerten."
         ),
         "style": "klar, lohnbezogen, pragmatisch",
@@ -239,8 +251,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Spricht aus Sicht von Menschen ohne Erwerbsarbeit.",
         "goal": "Würde und Planbarkeit ohne Sanktionsdruck stärken.",
         "conflict": (
-            "Befürworte bedingungslose Absicherung; widersprich Sanktions- und "
-            "Zwangsarbeit-Narrativen."
+            "Befürworte «{measure}» als bedingungslose Absicherung; widersprich "
+            "Sanktions- und Zwangsarbeit-Narrativen."
         ),
         "style": "direkt, menschenwürdig, fordernd",
     },
@@ -250,7 +262,7 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Fokussiert Bildung, Nebenjobs und Studienfinanzierung.",
         "goal": "Studium ohne prekäre Nebenjobs ermöglichen.",
         "conflict": (
-            "Unterstütze Grundeinkommen für Planungssicherheit im Studium; "
+            "Unterstütze «{measure}» für Planungssicherheit im Studium; "
             "widersprich Altersgrenzen, die Studierende ausschließen."
         ),
         "style": "sachlich, zukunftsbezogen",
@@ -261,8 +273,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Vertritt Gründer und Betriebsrisiken bei Transfers.",
         "goal": "Finanzierbarkeit und Fachkräfteanreize prüfen.",
         "conflict": (
-            "Lehne ungeprüfte Vollauszahlung ab; fordere Piloten und "
-            "Gegenfinanzierung; widersprich Versprechen ohne Steuerkonzept."
+            "Lehne ungeprüfte Vollauszahlung von «{measure}» ab; fordere Piloten "
+            "und Gegenfinanzierung; widersprich Versprechen ohne Steuerkonzept."
         ),
         "style": "kostenbewusst, nüchtern",
     },
@@ -272,8 +284,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Vertritt Betriebe bei Lohnkosten und Planungssicherheit.",
         "goal": "Wirtschaftliche Risiken und praktikable Übergänge benennen.",
         "conflict": (
-            "Fordere Übergangsregeln und Gegenfinanzierung; widersprich "
-            "pauschalen Transfers ohne Arbeitsmarktanalyse."
+            "Fordere Übergangsregeln und Gegenfinanzierung für «{measure}»; "
+            "widersprich pauschalen Transfers ohne Arbeitsmarktanalyse."
         ),
         "style": "kostenbewusst, lösungsorientiert, nüchtern",
     },
@@ -283,8 +295,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Betont Altersarmut und Kaufkraft im Ruhestand.",
         "goal": "Altersarmut mindern ohne Rentenlogik zu zerstören.",
         "conflict": (
-            "Befürworte Aufstockung bei Niedrigrenten; widersprich Kürzungen "
-            "bestehender Ansprüche."
+            "Befürworte «{measure}» als Aufstockung bei Niedrigrenten; widersprich "
+            "Kürzungen bestehender Ansprüche."
         ),
         "style": "ruhig, gerechtigkeitsbezogen",
     },
@@ -294,8 +306,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Spricht für Solo-Selbstständige und Auftragsschwankungen.",
         "goal": "Einkommensschwankungen absichern ohne Bürokratiechaos.",
         "conflict": (
-            "Unterstütze stabile Basisabsicherung; fordere klare Regeln für "
-            "Selbstständige; lehne Modelle ab, die Beiträge verdoppeln."
+            "Unterstütze «{measure}» als stabile Basisabsicherung; fordere klare "
+            "Regeln für Selbstständige; lehne Modelle ab, die Beiträge verdoppeln."
         ),
         "style": "praktisch, risikobewusst",
     },
@@ -305,7 +317,7 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Wägt Mehrheiten, Recht und Haushaltsregeln ab.",
         "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
         "conflict": (
-            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte "
             "zwischen sozialer Absicherung und Haushaltsgrenzen."
         ),
         "style": "abwägend, öffentlichkeitsorientiert, strategisch",
@@ -316,7 +328,7 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Wägt Mehrheiten, Recht und Haushaltsregeln ab.",
         "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
         "conflict": (
-            "Suche Mehrheitsfähigkeit und Kompromissformeln; markiere Konflikte "
+            "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte "
             "zwischen sozialer Absicherung und Haushaltsgrenzen."
         ),
         "style": "abwägend, öffentlichkeitsorientiert, strategisch",
@@ -327,8 +339,8 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Prüft Anreiz-, Inflations- und Finanzierungseffekte.",
         "goal": "Empirische Risiken und Annahmen offenlegen.",
         "conflict": (
-            "Stelle Finanzierungs- und Inflationsrisiken heraus; unterstütze "
-            "nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+            "Stelle Finanzierungs- und Inflationsrisiken von «{measure}» heraus; "
+            "unterstütze nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
         ),
         "style": "analytisch, vorsichtig",
     },
@@ -338,10 +350,113 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
         "description": "Prüft Anreiz-, Inflations- und Finanzierungseffekte.",
         "goal": "Empirische Risiken und Annahmen offenlegen.",
         "conflict": (
-            "Stelle Finanzierungs- und Inflationsrisiken heraus; unterstütze "
-            "nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+            "Stelle Finanzierungs- und Inflationsrisiken von «{measure}» heraus; "
+            "unterstütze nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
         ),
         "style": "analytisch, vorsichtig",
+    },
+}
+
+# Labor / working-time roles — no BGE vocabulary (Vier-Tage-Woche etc.).
+_ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
+    "arbeitnehmer": {
+        "name": "Arbeitnehmerstimme",
+        "slug": "arbeitnehmer",
+        "description": "Vertritt abhängig Beschäftigte zu Arbeitszeit und Lohn.",
+        "goal": "Arbeitszeitverkürzung ohne Einkommensverlust absichern.",
+        "conflict": (
+            "Unterstütze «{measure}» für Lebensqualität, aber fordere echten "
+            "Lohnausgleich; lehne Modelle ab, die Leistungsdruck erhöhen."
+        ),
+        "style": "klar, lohnbezogen, pragmatisch",
+    },
+    "unternehmer": {
+        "name": "Unternehmerstimme",
+        "slug": "unternehmer",
+        "description": "Vertritt Betriebe zu Produktivität und Personalkosten.",
+        "goal": "Wettbewerbsfähigkeit und Fachkräftebindung prüfen.",
+        "conflict": (
+            "Lehne ungeprüfte Einführung von «{measure}» ab; fordere Branchenpiloten "
+            "und Gegenfinanzierung; widersprich Versprechen ohne Produktivitätskonzept."
+        ),
+        "style": "kostenbewusst, nüchtern",
+    },
+    "unternehmen": {
+        "name": "Unternehmensvertretung",
+        "slug": "unternehmen",
+        "description": "Vertritt Betriebe bei Schichtplanung und Kosten.",
+        "goal": "Betriebliche Risiken und praktikable Übergänge benennen.",
+        "conflict": (
+            "Fordere Übergangsregeln für «{measure}»; widersprich pauschalen "
+            "Arbeitszeitregeln ohne Kapazitätsanalyse."
+        ),
+        "style": "kostenbewusst, lösungsorientiert, nüchtern",
+    },
+    "oekonomen": {
+        "name": "Ökonomenstimme",
+        "slug": "oekonomen",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "goal": "Empirische Risiken und Annahmen offenlegen.",
+        "conflict": (
+            "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
+            "unterstütze nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+        ),
+        "style": "analytisch, vorsichtig",
+    },
+    "oekonom": {
+        "name": "Ökonomenstimme",
+        "slug": "oekonom",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "goal": "Empirische Risiken und Annahmen offenlegen.",
+        "conflict": (
+            "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
+            "unterstütze nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+        ),
+        "style": "analytisch, vorsichtig",
+    },
+    "wirtschaftsexperten": {
+        "name": "Ökonomenstimme",
+        "slug": "oekonomen",
+        "description": "Prüft Produktivitäts-, Beschäftigungs- und Kosteneffekte.",
+        "goal": "Empirische Risiken und Annahmen offenlegen.",
+        "conflict": (
+            "Stelle Produktivitäts- und Wettbewerbsrisiken von «{measure}» heraus; "
+            "unterstütze nur evidenzbasierte Piloten; widersprich utopischen Annahmen."
+        ),
+        "style": "analytisch, vorsichtig",
+    },
+    "politiker": {
+        "name": "Politikstimme",
+        "slug": "politiker",
+        "description": "Wägt Mehrheiten, Recht und Arbeitsmarktregeln ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte zwischen "
+            "Lebensqualität und Wettbewerbsfähigkeit."
+        ),
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
+    "politik": {
+        "name": "Politikstimme",
+        "slug": "politik",
+        "description": "Wägt Mehrheiten, Recht und Arbeitsmarktregeln ab.",
+        "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+        "conflict": (
+            "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte zwischen "
+            "Lebensqualität und Wettbewerbsfähigkeit."
+        ),
+        "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+    },
+    "bürger": {
+        "name": "Bürgerstimme",
+        "slug": "buerger",
+        "description": "Spricht für Alltag, Freizeit und Lebensqualität.",
+        "goal": "Work-Life-Balance und Alltagsfolgen sichtbar machen.",
+        "conflict": (
+            "Befürworte «{measure}» für mehr freie Zeit; widersprich Argumenten "
+            "ohne Alltagsbezug."
+        ),
+        "style": "direkt, erfahrungsbezogen, pragmatisch",
     },
 }
 
@@ -692,6 +807,11 @@ _DEFAULT_STAKEHOLDERS_INCOME = (
     "Politiker",
     "Ökonomen",
 )
+_DEFAULT_STAKEHOLDERS_LABOR = (
+    "Arbeitnehmer",
+    "Unternehmer",
+    "Ökonomen",
+)
 
 # Instruction / test-prompt stems that must never become agent names.
 _INSTRUCTION_STEMS = (
@@ -871,11 +991,12 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
 
     # 4) Deterministic fallbacks when the prompt only names the debate topic.
     if not roles:
-        fallback = (
-            _DEFAULT_STAKEHOLDERS_INCOME
-            if domain == "income"
-            else _DEFAULT_STAKEHOLDERS
-        )
+        if domain == "income":
+            fallback = _DEFAULT_STAKEHOLDERS_INCOME
+        elif domain == "labor":
+            fallback = _DEFAULT_STAKEHOLDERS_LABOR
+        else:
+            fallback = _DEFAULT_STAKEHOLDERS
         for role in fallback:
             _add(role)
             if len(roles) >= limit:
@@ -992,6 +1113,16 @@ def _unique_suffix(scenario: str, agent_id: int, slug: str) -> str:
     return digest[:6]
 
 
+def _bind_measure(persona: dict[str, str], measure: str) -> dict[str, str]:
+    """Fill ``{measure}`` placeholders — never leave prior-topic defaults."""
+    out = dict(persona)
+    for key in ("description", "goal", "conflict"):
+        raw = out.get(key) or ""
+        if "{measure}" in raw:
+            out[key] = raw.replace("{measure}", measure)
+    return out
+
+
 def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
     if domain == "income":
         table = dict(_ROLE_PERSONAS_INCOME)
@@ -999,11 +1130,18 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
         table["buerger"] = dict(table["bürger"])
         table["oekonomen"] = dict(table["oekonomen"])
         return table
+    if domain == "labor":
+        table = dict(_ROLE_PERSONAS_LABOR)
+        table["buerger"] = dict(table["bürger"])
+        table["oekonomen"] = dict(table["oekonomen"])
+        # Stakeholder plural from prompts («Wirtschaftsexperten»).
+        table["wirtschaftsexperten"] = dict(table["wirtschaftsexperten"])
+        return table
     if domain == "mobility":
         table = dict(_ROLE_PERSONAS_MOBILITY)
         table["buerger"] = dict(table["bürger"])
         return table
-    # Generic: income-style citizen/politics without mobility leaks.
+    # Generic: measure-bound citizen/politics without mobility or BGE leaks.
     table = {
         "bürger": {
             "name": "Bürgerstimme",
@@ -1011,15 +1149,80 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
             "description": "Spricht für Alltag und Lebensqualität der Bevölkerung.",
             "goal": "Alltagsfolgen und Gerechtigkeit sichtbar machen.",
             "conflict": (
-                "Fordere soziale Abfederung; widersprich Argumenten ohne Alltagsbezug."
+                "Fordere soziale Abfederung bei «{measure}»; widersprich Argumenten "
+                "ohne Alltagsbezug."
             ),
             "style": "direkt, erfahrungsbezogen, pragmatisch",
         },
-        "unternehmen": dict(_ROLE_PERSONAS_INCOME["unternehmen"]),
-        "politiker": dict(_ROLE_PERSONAS_INCOME["politiker"]),
-        "politik": dict(_ROLE_PERSONAS_INCOME["politik"]),
+        "unternehmen": {
+            "name": "Unternehmensvertretung",
+            "slug": "unternehmen",
+            "description": "Vertritt Betriebe bei Kosten und Planungssicherheit.",
+            "goal": "Wirtschaftliche Risiken und praktikable Übergänge benennen.",
+            "conflict": (
+                "Fordere Übergangsregeln für «{measure}»; widersprich pauschalen "
+                "Vorgaben ohne Branchenanalyse."
+            ),
+            "style": "kostenbewusst, lösungsorientiert, nüchtern",
+        },
+        "unternehmer": {
+            "name": "Unternehmerstimme",
+            "slug": "unternehmer",
+            "description": "Vertritt Gründer und Betriebsrisiken.",
+            "goal": "Finanzierbarkeit und Umsetzung prüfen.",
+            "conflict": (
+                "Lehne ungeprüfte Vollumsetzung von «{measure}» ab; fordere Piloten "
+                "und Gegenfinanzierung."
+            ),
+            "style": "kostenbewusst, nüchtern",
+        },
+        "politiker": {
+            "name": "Politikstimme",
+            "slug": "politiker",
+            "description": "Wägt Mehrheiten, Recht und Umsetzbarkeit ab.",
+            "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+            "conflict": (
+                "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte "
+                "zwischen Betroffenen und Kostengrenzen."
+            ),
+            "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+        },
+        "politik": {
+            "name": "Politikstimme",
+            "slug": "politik",
+            "description": "Wägt Mehrheiten, Recht und Umsetzbarkeit ab.",
+            "goal": "Politische Machbarkeit und Zielkonflikte klar machen.",
+            "conflict": (
+                "Suche Mehrheitsfähigkeit für «{measure}»; markiere Konflikte "
+                "zwischen Betroffenen und Kostengrenzen."
+            ),
+            "style": "abwägend, öffentlichkeitsorientiert, strategisch",
+        },
+        "arbeitnehmer": {
+            "name": "Arbeitnehmerstimme",
+            "slug": "arbeitnehmer",
+            "description": "Vertritt abhängig Beschäftigte und Alltagsfolgen.",
+            "goal": "Beschäftigteninteressen bei der Maßnahme klar vertreten.",
+            "conflict": (
+                "Unterstütze «{measure}» wo Alltagsvorteile klar sind; fordere "
+                "Absicherung gegen Mehrbelastung."
+            ),
+            "style": "klar, lohnbezogen, pragmatisch",
+        },
+        "oekonomen": {
+            "name": "Ökonomenstimme",
+            "slug": "oekonomen",
+            "description": "Prüft Kosten-, Anreiz- und Verteilungseffekte.",
+            "goal": "Empirische Risiken und Annahmen offenlegen.",
+            "conflict": (
+                "Stelle Risiken von «{measure}» heraus; unterstütze nur "
+                "evidenzbasierte Piloten; widersprich utopischen Annahmen."
+            ),
+            "style": "analytisch, vorsichtig",
+        },
     }
     table["buerger"] = dict(table["bürger"])
+    table["oekonom"] = dict(table["oekonomen"])
     return table
 
 
@@ -1053,11 +1256,12 @@ def _persona_for_role(
     arch_fallback: dict[str, str],
     *,
     domain: str = "generic",
+    measure: str = "die vorgeschlagene Maßnahme",
 ) -> dict[str, str]:
     key = _role_key(role)
     table = _persona_table_for_domain(domain)
     if key in table:
-        base = dict(table[key])
+        base = _bind_measure(dict(table[key]), measure)
         base["role_label"] = base.get("name") or role
         return base
     # Unknown role → keep voice, but never use the raw group noun as display name.
@@ -1068,10 +1272,10 @@ def _persona_for_role(
         "description": (
             f"Spricht aus der Perspektive «{label}». {arch_fallback['description']}"
         ),
-        "goal": f"Interessen von {label} im Szenario klar vertreten. {arch_fallback['goal']}",
+        "goal": f"Interessen von {label} zu «{measure}» klar vertreten. {arch_fallback['goal']}",
         "conflict": (
-            f"Vertrete konsequent «{label}» gegen konkurrierende Stakeholder-Interessen; "
-            f"keine ausgewogene Gesamtschau aller Seiten."
+            f"Vertrete konsequent «{label}» zu «{measure}» gegen konkurrierende "
+            f"Stakeholder-Interessen; keine ausgewogene Gesamtschau aller Seiten."
         ),
         "style": arch_fallback["style"],
         "role_label": label,
@@ -1122,7 +1326,9 @@ def generate_dynamic_agents(
         arch = _archetype_for_domain(_ARCHETYPES[i % len(_ARCHETYPES)], domain)
         voice_id = _unique_suffix(short, i, arch["slug"])
         if i < len(roles):
-            persona = _persona_for_role(roles[i], arch, domain=domain)
+            persona = _persona_for_role(
+                roles[i], arch, domain=domain, measure=measure
+            )
             role_key = _role_key(roles[i])
             # Prefer canonical key used by individual pools.
             if role_key not in _INDIVIDUALS_BY_ROLE and persona.get("slug"):

@@ -64,6 +64,11 @@ _EXCEPTION_MARKERS = (
     "anwohnerpark",
     "pilot mit",
     "piloten und",
+    "pilotprojekt",
+    "pilotprojekte",
+    "plädiere deshalb für pilot",
+    "plädiere für evidenzbasierte pilot",
+    "plädiere für pilot",
     "abbruchkriterien",
     "schrittweise einführung",
 )
@@ -90,6 +95,9 @@ _PRO_MARKERS = (
     "bedingungslose absicherung",
     "ermöglicht, sich voll auf das studium",
     "für studierende eine enorme erleichterung",
+    # Live Vier-Tage-Woche (Phase 7.3.1 fixture bdfb9e9d).
+    "grundsätzlich positiv",
+    "lebensqualität verbessert",
     "support the ban",
     "agree with the ban",
 )
@@ -153,6 +161,13 @@ _CONTRA_MARKERS = (
     "arbeitsanreize und lohnkosten",
     "auswirkungen auf arbeitsanreize",
     "praktische evidenz für positive effekte",
+    # Live Vier-Tage-Woche critique (Phase 7.3.1).
+    "sehe ich die idee",
+    "kritisch, solange",
+    "sehe ich … kritisch",
+    "mehrkosten, die ohne gegenfinanzierung",
+    "ohne klaren finanzierungsmodellen",
+    "solange keine klaren finanzierungsmodelle",
 )
 
 # Balanced BGE / measure stance: support + incentive / wage caveats (not full contra).
@@ -317,15 +332,21 @@ def _polarity(text: str) -> str:
     if _is_seed_content(raw):
         return "unknown"
     low = raw.lower()
-    if any(m in low for m in _UNCERTAIN_MARKERS):
-        return "uncertain"
+    uncertain_hit = any(m in low for m in _UNCERTAIN_MARKERS)
 
     conditional_hit = sum(1 for m in _CONDITIONAL_MARKERS if m in low)
     pro = sum(1 for m in _PRO_MARKERS if m in low)
     if _PRO_BAN_RE.search(low):
         pro += 1
+    # Soft support phrasing common in live labor debates.
+    if "grundsätzlich positiv" in low:
+        pro += 1
     contra = sum(1 for m in _CONTRA_MARKERS if m in low)
     if _CONTRA_REJECT_RE.search(low):
+        contra += 1
+    if "kritisch, solange" in low or (
+        "sehe ich die idee" in low and "kritisch" in low
+    ):
         contra += 1
     classic_exception = sum(1 for m in _EXCEPTION_MARKERS if m in low)
     bge_balance = sum(1 for m in _BGE_EXCEPTION_MARKERS if m in low)
@@ -350,6 +371,10 @@ def _polarity(text: str) -> str:
         return "contra"
     if exception:
         return "conditional"
+    # Uncertain only when no clearer polarity (7.3.1 — «unklar» must not
+    # hide pilot/conditional language from live Vier-Tage comments).
+    if uncertain_hit:
+        return "uncertain"
     if mediating and pro == 0 and contra == 0:
         return "uncertain"
     if any(m in low for m in _SHIFT_MARKERS):
