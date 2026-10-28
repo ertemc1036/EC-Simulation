@@ -1,12 +1,17 @@
-"""OASIS reply / interaction API facts for Phase 4.
+"""OASIS reply / interaction API facts for Phase 4/5.
 
 camel-oasis==0.2.5 (Reddit platform) has **no** nested-reply field and **no**
 separate ``reply`` ActionType. Documented here so the engine, prompts, graph,
 and dashboard stay aligned with the real platform surface.
+
+Phase 5 adds *local* comment references in content (``→Kommentar#N``) because
+OASIS cannot nest comments; graph ``responds_to`` uses those refs as evidence.
 """
 from __future__ import annotations
 
 from typing import Any
+
+from backend.simulation.social_dynamics import SOCIAL_RELATIONS
 
 # Verified against oasis.social_agent.agent_action.SocialAction.create_comment
 # and oasis.social_platform.platform.Platform.create_comment + schema/comment.sql.
@@ -27,9 +32,12 @@ OASIS_REPLY_API: dict[str, Any] = {
     "documented_alternative": (
         "OASIS has no parent_comment_id. Reply = CREATE_COMMENT on an observed "
         "post_id (flat thread under the post). Nested comment→comment replies "
-        "are not supported. Agreement / disagreement = LIKE_POST / DISLIKE_POST "
-        "or LIKE_COMMENT / DISLIKE_COMMENT on the observed id — no quotas."
+        "are not supported — use local text refs →Kommentar#N in content. "
+        "Agreement / disagreement = LIKE_POST / DISLIKE_POST "
+        "or LIKE_COMMENT / DISLIKE_COMMENT on the observed id — no quotas. "
+        "Round 2+: prefer like_comment/dislike_comment on visible Kommentar# IDs."
     ),
+    "local_comment_ref_convention": "→Kommentar#<id> inside create_comment content",
     "interaction_tools": [
         "create_comment",  # reply to post
         "like_post",
@@ -40,11 +48,9 @@ OASIS_REPLY_API: dict[str, Any] = {
         "follow",
         "do_nothing",
     ],
-    "graph_relations_evidenced_only": [
-        "replied_to",
-        "agrees_with",
-        "disagrees_with",
-    ],
+    "graph_relations_evidenced_only": sorted(
+        {"replied_to", *SOCIAL_RELATIONS}
+    ),
 }
 
 

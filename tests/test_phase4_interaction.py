@@ -176,7 +176,12 @@ def test_graph_no_interaction_without_evidence():
         action_log=[],
     )
     ir = g.to_dict()["interaction_relations"]
-    assert ir == {"agrees_with": 0, "disagrees_with": 0, "replied_to": 0}
+    assert ir["agrees_with"] == 0
+    assert ir["disagrees_with"] == 0
+    assert ir["replied_to"] == 0
+    assert ir.get("responds_to", 0) == 0
+    assert ir.get("position_changed", 0) == 0
+    assert ir.get("influenced_by", 0) == 0
 
 
 def test_scripted_llm_run_phase4_interactions(results_dir: Path):
@@ -223,7 +228,7 @@ def test_scripted_llm_run_phase4_interactions(results_dir: Path):
     assert state["agent_memory"]["agent_count_with_memory"] >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 4.1
+    assert data["meta"]["phase"] == 5
     assert data["meta"]["token_optimization"]["chat_history_reset_per_decision"] is True
     assert data["meta"]["token_optimization"]["ids_retained"] is True
     assert data["meta"]["token_optimization"]["atomic_reserve"] is True
@@ -248,7 +253,7 @@ def test_budget_and_approval_regression(results_dir: Path, monkeypatch: pytest.M
     assert cfg.max_tokens_per_call == 500
     assert cfg.max_cost_usd_per_run == 0.20
     assert cfg.max_parallel_llm_calls == 1
-    assert cfg.status_payload()["phase"] == "4.1"
+    assert cfg.status_payload()["phase"] == "5"
     assert cfg.status_payload()["llm_run_requires_approval"] is True
 
     # Approval gate still blocks without llm_run_approved.
