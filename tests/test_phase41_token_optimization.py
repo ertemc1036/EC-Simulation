@@ -103,7 +103,7 @@ def test_limits_unchanged_20k_10_500_020_5_2(results_dir: Path):
 
 
 def test_prompt_bundle_v4_and_slim_system():
-    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v4"
+    assert PROMPT_BUNDLE_ID == "ec-custom-forum-de-v5"
     sys_p = build_system_prompt(
         DEFAULT_AGENTS[0], scenario=BERLIN, language="de"
     )
@@ -309,7 +309,7 @@ def test_two_round_scripted_growth_bounded(results_dir: Path):
 
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 4.1
+    assert data["meta"]["phase"] == 5
     assert data["meta"]["prompt_bundle_id"] == PROMPT_BUNDLE_ID
     assert data["meta"]["token_optimization"]["chat_history_reset_per_decision"] is True
     assert data["meta"]["token_optimization"]["atomic_reserve"] is True

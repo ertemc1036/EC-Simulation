@@ -48,21 +48,22 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-4.1) misses interaction / oasis_reply fields. */
+/** Stale Flask on :5001 (pre-Phase-5) misses positions / oasis_reply fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
-  const phaseOk = phase === '4' || phase === '4.1' || phase.startsWith('4')
+  const phaseOk = phase === '5' || phase.startsWith('5')
   const hasRevision = Boolean(h.runtime?.code_revision)
   const hasGenModes = Array.isArray(h.config?.agent_generation_modes)
   const hasOasisReply = Boolean(h.config?.oasis_reply)
-  if (phaseOk && hasRevision && hasGenModes && hasOasisReply) return null
+  const hasSocial = Boolean(h.config?.social_dynamics)
+  if (phaseOk && hasRevision && hasGenModes && hasOasisReply && hasSocial) return null
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 4.1 oder fehlende Phase-4-Felder). ' +
-      'Flask auf Port 5001 neu starten, sonst fehlen Interaktionsgraph / oasis_reply.',
+      'Backend wirkt veraltet (Phase ≠ 5 oder fehlende Social-Dynamics-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst fehlen Positionen / Beziehungen.',
   }
 })
 
@@ -138,13 +139,31 @@ const memoryAgents = computed(() => {
 const graphSummary = computed(() => {
   const g = sim.value?.knowledge_graph
   if (!g) return null
+  const social = g.social_relations || {}
+  const socialEdges = (g.edges || []).filter((e) =>
+    ['agrees_with', 'disagrees_with', 'responds_to', 'influenced_by', 'position_changed'].includes(
+      e.relation,
+    ),
+  )
   return {
     nodes: g.node_count ?? 0,
     edges: g.edge_count ?? 0,
     kinds: g.counts_by_kind || {},
     relations: g.counts_by_relation || {},
-    sampleEdges: (g.edges || []).slice(0, 12),
+    social,
+    sampleEdges: socialEdges.slice(0, 16),
     note: g.note,
+  }
+})
+
+const positionSummary = computed(() => {
+  const snap = sim.value?.agent_positions
+  if (!snap?.positions?.length) return null
+  return {
+    count: snap.agent_count ?? snap.positions.length,
+    changes: snap.change_count ?? 0,
+    positions: snap.positions,
+    note: snap.note,
   }
 })
 
@@ -481,7 +500,11 @@ onUnmounted(() => {
             <p>{{ c.content }}</p>
           </li>
           <li v-for="(r, i) in sim.reactions" :key="'r' + i">
-            <span class="meta">{{ r.type }} · user {{ r.user_id }} → post {{ r.post_id }}</span>
+            <span class="meta">
+              {{ r.type }} · user {{ r.user_id }}
+              <span v-if="r.comment_id != null"> → comment {{ r.comment_id }}</span>
+              <span v-else> → post {{ r.post_id }}</span>
+            </span>
           </li>
         </ul>
         <p v-else class="empty">Noch keine Reaktionen.</p>
@@ -568,15 +591,39 @@ onUnmounted(() => {
         <p v-else class="empty">Noch keine Memory-Einträge.</p>
       </div>
       <div>
-        <h2>Relations</h2>
+        <h2>Positionen</h2>
+        <p class="lede-sm" v-if="positionSummary">
+          {{ positionSummary.count }} Agenten ·
+          {{ positionSummary.changes }} Positionswechsel (belegt)
+        </p>
+        <ul class="feed compact" v-if="positionSummary?.positions?.length">
+          <li v-for="p in positionSummary.positions" :key="'pos' + p.agent_id">
+            <span class="meta">
+              Agent {{ p.agent_id }} · {{ p.polarity || '?' }}
+              <span v-if="p.changed"> · geändert</span>
+              <span v-if="p.influenced_by_agent_ids?.length">
+                · beeinflusst von {{ p.influenced_by_agent_ids.join(', ') }}
+              </span>
+            </span>
+            <p>{{ p.stance }}</p>
+            <p v-if="p.previous_stance" class="meta">vorher: {{ p.previous_stance }}</p>
+          </li>
+        </ul>
+        <p v-else class="empty">Positionen nach dem Lauf sichtbar.</p>
+
+        <h2>Beziehungen</h2>
         <p class="lede-sm" v-if="graphSummary">
           {{ graphSummary.nodes }} Knoten · {{ graphSummary.edges }} Kanten —
-          Interaktion nur belegt: replied_to / agrees_with / disagrees_with.
+          Social nur belegt: agrees / disagrees / responds_to / influenced_by /
+          position_changed.
         </p>
         <ul class="meta-list" v-if="interactionSummary">
-          <li>replied_to: {{ interactionSummary.replied_to }}</li>
           <li>agrees_with: {{ interactionSummary.agrees_with }}</li>
           <li>disagrees_with: {{ interactionSummary.disagrees_with }}</li>
+          <li>responds_to: {{ interactionSummary.responds_to }}</li>
+          <li>influenced_by: {{ interactionSummary.influenced_by }}</li>
+          <li>position_changed: {{ interactionSummary.position_changed }}</li>
+          <li>replied_to (legacy): {{ interactionSummary.replied_to }}</li>
           <li>Kommentare: {{ interactionSummary.comments }}</li>
           <li>
             Reaktionen: Post {{ interactionSummary.post_reactions }} ·
@@ -587,17 +634,13 @@ onUnmounted(() => {
           OASIS Reply-API: parent_comment_id={{ oasisReplyNote.parent }} ·
           Reply via {{ oasisReplyNote.via }}
         </p>
-        <ul class="meta-list" v-if="graphSummary">
-          <li v-for="(n, k) in graphSummary.kinds" :key="'k' + k">{{ k }}: {{ n }}</li>
-          <li v-for="(n, r) in graphSummary.relations" :key="'r' + r">{{ r }}: {{ n }}</li>
-        </ul>
         <ol class="log" v-if="graphSummary?.sampleEdges?.length">
           <li v-for="e in graphSummary.sampleEdges" :key="e.id">
             <span class="mono">{{ e.relation }}</span>
             · {{ e.source }} → {{ e.target }}
           </li>
         </ol>
-        <p v-else class="empty">Wissensgraph leer — nach dem Lauf sichtbar.</p>
+        <p v-else class="empty">Beziehungen leer — nach dem Lauf sichtbar.</p>
       </div>
     </section>
   </div>

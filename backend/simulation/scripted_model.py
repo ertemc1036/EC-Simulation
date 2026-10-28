@@ -3,6 +3,9 @@
 NOT a production substitute for OpenAI. Used only when injected (unit/integration tests).
 Returns tool_calls so SocialAgent.perform_action_by_llm executes real platform actions
 after observing the environment (posts from other agents).
+
+Phase 5: Round 2+ prefers comment reactions / local →Kommentar# refs so
+agrees_with / disagrees_with / responds_to are evidenced offline.
 """
 from __future__ import annotations
 
@@ -34,6 +37,7 @@ _POST_HASH_RE = re.compile(r"Post#(\d+)", re.IGNORECASE)
 _COMMENT_HASH_RE = re.compile(r"Kommentar#(\d+)", re.IGNORECASE)
 _COMMENT_ID_RE = re.compile(r'"comment_id"\s*:\s*(\d+)')
 _COMMENT_ID_HINT_RE = re.compile(r"comment_id\s*=\s*(\d+)", re.IGNORECASE)
+_ROUND_RE = re.compile(r"Runde:\s*(\d+)", re.IGNORECASE)
 
 
 def _extract_post_ids(blob: str) -> list[int]:
@@ -66,6 +70,16 @@ def _extract_comment_ids(blob: str) -> list[int]:
     return ids
 
 
+def _extract_round(blob: str) -> int:
+    m = _ROUND_RE.search(blob or "")
+    if m:
+        try:
+            return max(1, int(m.group(1)))
+        except ValueError:
+            return 1
+    return 1
+
+
 class ScriptedReactiveModel(BaseModelBackend):
     """Observes prompt content; emits real OASIS tools: post/comment/like/dislike."""
 
@@ -93,6 +107,7 @@ class ScriptedReactiveModel(BaseModelBackend):
         blob = " ".join(str(m.get("content") or "") for m in messages)
         ids = _extract_post_ids(blob)
         comment_ids = _extract_comment_ids(blob)
+        round_n = _extract_round(blob)
         self.call_count += 1
         n = self.call_count
         # Rotate actions so multi-agent runs produce varied real platform interactions.
@@ -109,8 +124,51 @@ class ScriptedReactiveModel(BaseModelBackend):
                 },
             )
         target = ids[min(self.agent_id % len(ids), len(ids) - 1)]
+
+        # Seed a flat thread first so R2+ can react to Kommentar# IDs.
+        if not comment_ids:
+            return (
+                "create_comment",
+                {
+                    "post_id": target,
+                    "content": (
+                        f"[{self.label}:{self.agent_id}] Reply/Kommentar #{n} "
+                        f"auf Post {target} (kein parent_comment_id)."
+                    ),
+                },
+            )
+
+        # Phase 5: Round 2+ — comment reactions + local refs (Meinungsdynamik).
+        if round_n >= 2:
+            cid = comment_ids[
+                min(self.agent_id % len(comment_ids), len(comment_ids) - 1)
+            ]
+            kind_r2 = (n + self.agent_id) % 4
+            if kind_r2 == 0:
+                return ("like_comment", {"comment_id": cid})
+            if kind_r2 == 1:
+                return ("dislike_comment", {"comment_id": cid})
+            if kind_r2 == 2:
+                # Local comment reference inside flat create_comment content.
+                shift = (
+                    "Ich ändere meine Position nach dem Kommentar — Kompromiss."
+                    if (n + self.agent_id) % 2 == 0
+                    else "Ich halte dagegen und widerspreche klar."
+                )
+                return (
+                    "create_comment",
+                    {
+                        "post_id": target,
+                        "content": (
+                            f"[{self.label}:{self.agent_id}] →Kommentar#{cid} "
+                            f"{shift} (Runde {round_n}, kein parent_comment_id)."
+                        ),
+                    },
+                )
+            return ("like_post", {"post_id": target})
+
         kind = (n + self.agent_id) % 5
-        if kind == 0:
+        if kind in {0, 3}:
             return (
                 "create_comment",
                 {
@@ -125,21 +183,11 @@ class ScriptedReactiveModel(BaseModelBackend):
             return ("like_post", {"post_id": target})
         if kind == 2:
             return ("dislike_post", {"post_id": target})
-        if kind == 3 and comment_ids:
-            cid = comment_ids[min(self.agent_id % len(comment_ids), len(comment_ids) - 1)]
-            # Alternate agree / disagree on comments when visible.
-            if (n + self.agent_id) % 2 == 0:
-                return ("like_comment", {"comment_id": cid})
-            return ("dislike_comment", {"comment_id": cid})
-        return (
-            "create_post",
-            {
-                "content": (
-                    f"[{self.label}:{self.agent_id}] Follow-up #{n} nach Beobachtung "
-                    f"der Posts {ids[:5]}."
-                )
-            },
-        )
+        # kind == 4 with comments: like/dislike a visible comment.
+        cid = comment_ids[min(self.agent_id % len(comment_ids), len(comment_ids) - 1)]
+        if (n + self.agent_id) % 2 == 0:
+            return ("like_comment", {"comment_id": cid})
+        return ("dislike_comment", {"comment_id": cid})
 
     def _completion(
         self, name: str, args: dict[str, Any]

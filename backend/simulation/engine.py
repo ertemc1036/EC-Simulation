@@ -57,6 +57,7 @@ from backend.simulation.prompts import (
     model_calls_required_per_round,
     normalize_language,
 )
+from backend.simulation.social_dynamics import PositionTracker
 from backend.simulation.tracked_model import (
     DEFAULT_CONTEXT_TOKEN_LIMIT,
     TrackedModelBackend,
@@ -89,12 +90,15 @@ def _empty_interaction_summary() -> dict[str, Any]:
         "replied_to": 0,
         "agrees_with": 0,
         "disagrees_with": 0,
+        "responds_to": 0,
+        "influenced_by": 0,
+        "position_changed": 0,
         "comments": 0,
         "post_reactions": 0,
         "comment_reactions": 0,
         "note": (
-            "Nur belegte Interaktionen (create_comment / like_* / dislike_*). "
-            "OASIS: kein parent_comment_id."
+            "Nur belegte Social-Relations (like_*/dislike_*/create_comment/"
+            "lokale Kommentar-Refs/Positionswechsel). OASIS: kein parent_comment_id."
         ),
     }
 
@@ -105,20 +109,26 @@ def _build_interaction_summary(
     reactions: list[dict[str, Any]],
     knowledge_graph: dict[str, Any],
 ) -> dict[str, Any]:
-    """Dashboard-facing counts; graph interaction_relations are source of truth."""
+    """Dashboard-facing counts; graph social/interaction_relations are source of truth."""
     ir = knowledge_graph.get("interaction_relations") or {}
+    sr = knowledge_graph.get("social_relations") or {}
     post_rx = sum(1 for r in reactions if r.get("post_id") is not None)
     comment_rx = sum(1 for r in reactions if r.get("comment_id") is not None)
     return {
         "replied_to": int(ir.get("replied_to") or 0),
-        "agrees_with": int(ir.get("agrees_with") or 0),
-        "disagrees_with": int(ir.get("disagrees_with") or 0),
+        "agrees_with": int(sr.get("agrees_with") or ir.get("agrees_with") or 0),
+        "disagrees_with": int(
+            sr.get("disagrees_with") or ir.get("disagrees_with") or 0
+        ),
+        "responds_to": int(sr.get("responds_to") or 0),
+        "influenced_by": int(sr.get("influenced_by") or 0),
+        "position_changed": int(sr.get("position_changed") or 0),
         "comments": len(comments),
         "post_reactions": post_rx,
         "comment_reactions": comment_rx,
         "note": (
-            "Nur belegte Interaktionen (create_comment / like_* / dislike_*). "
-            "OASIS: kein parent_comment_id — Reply = create_comment(post_id)."
+            "Nur belegte Social-Relations. OASIS: kein parent_comment_id — "
+            "Reply = create_comment(post_id); Kommentar→Kommentar via →Kommentar#id."
         ),
     }
 
@@ -176,6 +186,7 @@ class SimulationState:
     model_calls: list[dict] = field(default_factory=list)
     cost_summary: dict[str, Any] = field(default_factory=dict)
     agent_memory: dict[str, Any] = field(default_factory=dict)
+    agent_positions: dict[str, Any] = field(default_factory=dict)
     knowledge_graph: dict[str, Any] = field(default_factory=dict)
     interaction_summary: dict[str, Any] = field(default_factory=dict)
     oasis_reply: dict[str, Any] = field(default_factory=dict)
@@ -208,6 +219,7 @@ class SimulationState:
             "model_calls": self.model_calls,
             "cost_summary": self.cost_summary,
             "agent_memory": self.agent_memory,
+            "agent_positions": self.agent_positions,
             "knowledge_graph": self.knowledge_graph,
             "interaction_summary": self.interaction_summary,
             "oasis_reply": self.oasis_reply,
@@ -249,6 +261,7 @@ class SimulationEngine:
             max_entries_per_agent=self.cfg.agent_local_memory_entries
         )
         self._knowledge_graph = LocalKnowledgeGraph()
+        self._positions = PositionTracker()
         self._run_language: str = "de"
         self._run_scenario: str = ""
         self._agent_generation: str = "dynamic"
@@ -476,6 +489,8 @@ class SimulationEngine:
                 max_entries_per_agent=self.cfg.agent_local_memory_entries
             )
             self._knowledge_graph = LocalKnowledgeGraph()
+            self._positions = PositionTracker()
+            self._positions.seed_from_goals(run_agents, step=0)
             self._limit_stop = False
             self._failed = False
             self._custom_prompts_verified = False
@@ -498,6 +513,7 @@ class SimulationEngine:
                 message=message,
                 agents=agent_dicts,
                 agent_memory=self._local_memory.snapshot(),
+                agent_positions=self._positions.positions_payload(),
                 knowledge_graph=self._knowledge_graph.to_dict(),
                 interaction_summary=_empty_interaction_summary(),
                 oasis_reply=reply_meta,
@@ -739,6 +755,8 @@ class SimulationEngine:
             with engine._lock:
                 posts_snap = list(engine.state.posts)
                 comments_snap = list(engine.state.comments)
+                round_n = max(1, int(engine.state.step) + 1)
+                pos_payload = engine.state.agent_positions or {}
             feed_context = format_feed_context(
                 posts_snap,
                 comments_snap,
@@ -748,6 +766,13 @@ class SimulationEngine:
                 profile.agent_id, limit=3
             )
             memory_context = format_memory_context(memory_entries)
+            position_context = None
+            for p in pos_payload.get("positions") or []:
+                if int(p.get("agent_id", -1)) == profile.agent_id:
+                    position_context = (
+                        f"{p.get('polarity') or '?'}: {p.get('stance') or ''}"
+                    )
+                    break
             user_content = build_decision_prompt(
                 scenario=scenario,
                 goal=profile.goal,
@@ -756,6 +781,8 @@ class SimulationEngine:
                 agent_name=profile.name,
                 feed_context=feed_context,
                 memory_context=memory_context,
+                round_number=round_n,
+                position_context=position_context,
             )
             user_msg = BaseMessage.make_user_message(
                 role_name="User",
@@ -1250,12 +1277,21 @@ class SimulationEngine:
     def _sync_memory_and_graph_locked(self, *, step: int | None = None) -> None:
         """Caller must hold ``self._lock`` (or accept best-effort race on idle)."""
         agent_ids = [p.agent_id for p in self._run_agents]
+        sync_step = step if step is not None else self.state.step
         self._local_memory.ingest_feed_snapshot(
             agent_ids=agent_ids,
             posts=self.state.posts,
             comments=self.state.comments,
-            step=step if step is not None else self.state.step,
+            step=sync_step,
         )
+        self._positions.update_from_snapshot(
+            agents=self._run_agents,
+            posts=self.state.posts,
+            comments=self.state.comments,
+            reactions=self.state.reactions,
+            step=sync_step,
+        )
+        positions_payload = self._positions.positions_payload()
         self._knowledge_graph.rebuild(
             scenario=self._run_scenario or self.state.scenario,
             agents=self._run_agents,
@@ -1263,8 +1299,11 @@ class SimulationEngine:
             comments=self.state.comments,
             reactions=self.state.reactions,
             action_log=self.state.action_log,
+            social_edge_specs=self._positions.social_edge_specs(),
+            agent_positions=positions_payload.get("positions") or [],
         )
         self.state.agent_memory = self._local_memory.snapshot()
+        self.state.agent_positions = positions_payload
         self.state.knowledge_graph = self._knowledge_graph.to_dict()
         self.state.interaction_summary = _build_interaction_summary(
             comments=self.state.comments,
@@ -1300,7 +1339,7 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 4.1,
+                "phase": 5,
                 "agent_count": agents_n,
                 "agent_generation": self._agent_generation,
                 "agent_memory_window": self.cfg.agent_memory_window,
@@ -1325,6 +1364,18 @@ class SimulationEngine:
                     "approval_gate": True,
                     "atomic_reserve": True,
                 },
+                "social_dynamics": {
+                    "persistent_positions": True,
+                    "local_comment_refs": True,
+                    "round2_comment_reactions": True,
+                    "relations_evidenced_only": [
+                        "agrees_with",
+                        "disagrees_with",
+                        "responds_to",
+                        "influenced_by",
+                        "position_changed",
+                    ],
+                },
             },
             "agents": self.state.agents,
             "posts": self.state.posts,
@@ -1335,6 +1386,7 @@ class SimulationEngine:
             "model_calls": self.state.model_calls,
             "cost_summary": self.state.cost_summary,
             "agent_memory": self.state.agent_memory,
+            "agent_positions": self.state.agent_positions,
             "knowledge_graph": self.state.knowledge_graph,
             "interaction_summary": self.state.interaction_summary,
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),

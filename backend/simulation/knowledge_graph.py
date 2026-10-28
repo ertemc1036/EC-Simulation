@@ -3,10 +3,11 @@
 Built offline from simulation state (agents + posts + comments + reactions).
 No external graph DB — dashboard-ready JSON only.
 
-Phase 4 interaction edges (only when evidenced by platform actions/DB rows):
-- ``replied_to`` — actor → post statement (via create_comment)
-- ``agrees_with`` — actor → post/comment statement (via like_*)
-- ``disagrees_with`` — actor → post/comment statement (via dislike_*)
+Phase 5 social relations (only when evidenced):
+- ``agrees_with`` / ``disagrees_with`` — like_* / dislike_*
+- ``responds_to`` — create_comment on post + local Kommentar# refs
+  (OASIS has no parent_comment_id)
+- ``influenced_by`` / ``position_changed`` — from PositionTracker changes
 """
 from __future__ import annotations
 
@@ -16,9 +17,15 @@ from typing import Any
 
 from backend.simulation.agents import AgentProfile
 from backend.simulation.agent_generator import extract_scenario_keywords
+from backend.simulation.social_dynamics import (
+    SOCIAL_RELATIONS,
+    collect_local_responds_to,
+)
 
-# Phase-4 interaction relations — never invent these without evidence.
-INTERACTION_RELATIONS = frozenset({"replied_to", "agrees_with", "disagrees_with"})
+# Phase-5 social + legacy replied_to (create_comment → post) for dashboards.
+INTERACTION_RELATIONS = frozenset(
+    {"replied_to", *SOCIAL_RELATIONS}
+)
 
 
 @dataclass
@@ -93,6 +100,8 @@ class LocalKnowledgeGraph:
         comments: list[dict[str, Any]],
         reactions: list[dict[str, Any]],
         action_log: list[dict[str, Any]] | None = None,
+        social_edge_specs: list[dict[str, Any]] | None = None,
+        agent_positions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Replace graph contents from the latest simulation snapshot."""
         self.clear()
@@ -123,6 +132,16 @@ class LocalKnowledgeGraph:
                 style = str(raw.get("style") or "")
                 user_name = str(raw.get("user_name") or "")
             nid = f"actor:{aid}"
+            pos_meta: dict[str, Any] = {}
+            for p in agent_positions or []:
+                if int(p.get("agent_id", -1)) == aid:
+                    pos_meta = {
+                        "stance": p.get("stance"),
+                        "polarity": p.get("polarity"),
+                        "stance_key": p.get("stance_key"),
+                        "position_changed": bool(p.get("changed")),
+                    }
+                    break
             self.upsert_node(
                 nid,
                 "actor",
@@ -131,6 +150,7 @@ class LocalKnowledgeGraph:
                 user_name=user_name,
                 goal=goal,
                 style=style,
+                **pos_meta,
             )
             agent_nodes[aid] = nid
             self.add_edge(nid, scenario_node.id, "discusses")
@@ -186,7 +206,7 @@ class LocalKnowledgeGraph:
                     "commented",
                     comment_id=cid,
                 )
-                # Phase 4: evidenced reply (OASIS = comment under post_id).
+                # Legacy Phase-4: evidenced reply (OASIS = comment under post_id).
                 parent_pid = c.get("post_id")
                 if parent_pid is not None and int(parent_pid) in post_statement:
                     self.add_edge(
@@ -207,6 +227,20 @@ class LocalKnowledgeGraph:
                     comment_id=cid,
                 )
             self.add_edge(sid, scenario_node.id, "about")
+
+        # Phase 5: local comment refs + flat post replies → responds_to.
+        for spec in collect_local_responds_to(
+            comments,
+            comment_statement_ids=comment_statement,
+            post_statement_ids=post_statement,
+            agent_nodes=agent_nodes,
+        ):
+            self.add_edge(
+                spec["source"],
+                spec["target"],
+                spec["relation"],
+                **(spec.get("meta") or {}),
+            )
 
         for r in reactions:
             rtype = str(r.get("type") or "like").lower()
@@ -276,6 +310,20 @@ class LocalKnowledgeGraph:
                             post_id=pid,
                             evidence="action_log:create_comment",
                         )
+                    # Phase 5 also maps create_comment → responds_to.
+                    reid = (
+                        f"responds_to:{agent_nodes[int(aid)]}->"
+                        f"{post_statement[int(pid)]}"
+                    )
+                    if reid not in self.edges:
+                        self.add_edge(
+                            agent_nodes[int(aid)],
+                            post_statement[int(pid)],
+                            "responds_to",
+                            edge_id=reid,
+                            post_id=pid,
+                            evidence="action_log:create_comment",
+                        )
             elif action in {"like_post", "dislike_post"}:
                 pid = args.get("post_id")
                 if pid is None or int(pid) not in post_statement:
@@ -316,8 +364,27 @@ class LocalKnowledgeGraph:
                         evidence=f"action_log:{action}",
                     )
 
+        # Phase 5: position_changed / influenced_by from PositionTracker.
+        for spec in social_edge_specs or []:
+            rel = str(spec.get("relation") or "")
+            src = str(spec.get("source") or "")
+            tgt = str(spec.get("target") or "")
+            if rel not in SOCIAL_RELATIONS or not src or not tgt:
+                continue
+            if src not in self.nodes or tgt not in self.nodes:
+                continue
+            meta = dict(spec.get("meta") or {})
+            self.add_edge(src, tgt, rel, **meta)
+
     def interaction_counts(self) -> dict[str, int]:
         counts = {r: 0 for r in sorted(INTERACTION_RELATIONS)}
+        for e in self.edges.values():
+            if e.relation in counts:
+                counts[e.relation] += 1
+        return counts
+
+    def social_relation_counts(self) -> dict[str, int]:
+        counts = {r: 0 for r in sorted(SOCIAL_RELATIONS)}
         for e in self.edges.values():
             if e.relation in counts:
                 counts[e.relation] += 1
@@ -333,6 +400,7 @@ class LocalKnowledgeGraph:
         for e in edges:
             by_rel[e["relation"]] = by_rel.get(e["relation"], 0) + 1
         interaction = self.interaction_counts()
+        social = self.social_relation_counts()
         return {
             "backend": "local",
             "node_count": len(nodes),
@@ -340,13 +408,14 @@ class LocalKnowledgeGraph:
             "counts_by_kind": by_kind,
             "counts_by_relation": by_rel,
             "interaction_relations": interaction,
+            "social_relations": social,
             "nodes": nodes,
             "edges": edges,
             "note": (
                 "Lokaler Wissensgraph (Akteure / Themen / Aussagen). "
-                "Phase-4 Interaktionskanten replied_to / agrees_with / "
-                "disagrees_with nur bei belegter Plattform-Aktion. "
-                "Kein externes Graph-Backend. OASIS: kein parent_comment_id."
+                "Phase-5 Social-Kanten agrees_with / disagrees_with / "
+                "responds_to / influenced_by / position_changed nur belegt. "
+                "OASIS: kein parent_comment_id — lokale Kommentar-Refs."
             ),
         }
 

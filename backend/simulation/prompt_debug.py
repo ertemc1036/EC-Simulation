@@ -13,8 +13,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # Stable id for the EC custom prompt bundle (system + decision templates).
-# v4 = Phase 4.1 token-optimized (slim system/decision, prioritized context).
-PROMPT_BUNDLE_ID = "ec-custom-forum-de-v4"
+# v5 = Phase 5 social dynamics (positions + R2 comment reactions) on v4 caps.
+PROMPT_BUNDLE_ID = "ec-custom-forum-de-v5"
 
 # Markers that prove OASIS stock Reddit/Twitter framing reached the client.
 OASIS_REDDIT_OBJECTIVE = "You're a Reddit user"

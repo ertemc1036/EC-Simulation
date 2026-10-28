@@ -8,6 +8,7 @@ feed after empty group-chat noise.
 
 Phase 4.1: slim system/decision text, prioritized feed/memory selection with hard
 caps, drop redundant OASIS env when FEED-KONTEXT is present, keep post/comment IDs.
+Phase 5: persistent positions + R2+ comment reactions via local Kommentar# refs.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ LANGUAGE_NAMES: dict[str, str] = {
     "it": "Italiano",
 }
 
-# Hard caps for decision-prompt context (Phase 4.1 token optimization).
+# Hard caps for decision-prompt context (Phase 4.1 token optimization — kept).
 MAX_FEED_POSTS = 4
 MAX_FEED_COMMENTS = 4
 MAX_MEMORY_ENTRIES = 3
@@ -68,8 +69,9 @@ Stil: {style}
 # REGELN
 1. Inhalte in der angegebenen Sprache.
 2. Aktionen dienen deinem Ziel — nicht fremde Stakeholder mitzusammenfassen.
-3. Interaktion: create_comment(post_id) als Reply (kein parent_comment_id); like_*/dislike_* auf Post/Kommentar-IDs; kein search/refresh wenn FEED IDs zeigt; kein doppelter Essay-Post.
-4. Tool-Calling only; in Rolle bleiben.
+3. Interaktion: create_comment(post_id) als Reply (kein parent_comment_id); bei Bezug auf Kommentar →Kommentar#id im Text; like_*/dislike_* auf Post/Kommentar-IDs; kein search/refresh wenn FEED IDs zeigt; kein doppelter Essay-Post.
+4. Position halten oder begründet ändern; Runde 2+: auf Kommentar# reagieren (like_comment/dislike_comment).
+5. Tool-Calling only; in Rolle bleiben.
 """
 )
 
@@ -233,7 +235,8 @@ def format_feed_context(
             "Diskussionsimpuls schreiben.)"
         )
     lines: list[str] = [
-        "IDs behalten. Reply=create_comment(post_id); kein parent_comment_id."
+        "IDs behalten. Reply=create_comment(post_id); kein parent_comment_id; "
+        "Kommentar-Bezug: →Kommentar#id im Text; R2+: like_comment/dislike_comment."
     ]
     recent = select_prioritized_posts(
         posts or [], viewer_id=viewer_id, max_posts=max_posts
@@ -290,11 +293,14 @@ def build_decision_prompt(
     feed_context: str | None = None,
     memory_context: str | None = None,
     include_env: bool | None = None,
+    round_number: int | None = None,
+    position_context: str | None = None,
 ) -> str:
     """Per-decision user message — slim; system prompt already has persona/scenario.
 
     Phase 4.1: scenario/goal only as short anchors (not full re-essay), drop OASIS
     env body when FEED-KONTEXT already carries IDs (env duplicates posts + noise).
+    Phase 5: R2+ pushes comment reactions + local →Kommentar# refs; position line.
     """
     lang = normalize_language(language)
     lang_name = LANGUAGE_NAMES[lang]
@@ -316,13 +322,28 @@ def build_decision_prompt(
     goal_anchor = (goal or "").strip()
     if len(goal_anchor) > 140:
         goal_anchor = goal_anchor[:137] + "…"
+    round_n = int(round_number) if round_number is not None else 1
+    if round_n >= 2:
+        interact = (
+            "INTERAKTIONSKONTEXT Runde 2+: like_comment/dislike_comment auf "
+            "sichtbare Kommentar#; oder create_comment(post_id) mit →Kommentar#id "
+            "im Text (kein parent_comment_id); Position halten/ändern."
+        )
+    else:
+        interact = (
+            "INTERAKTIONSKONTEXT: create_comment(post_id) / like_* / dislike_*; "
+            "kein search/refresh, kein doppelter Essay."
+        )
+    pos = (position_context or "").strip()
+    pos_line = f"\nPOSITION: {pos[:160]}" if pos else ""
     return (
         f"Entscheide jetzt als {agent_name}.\n"
         f"Szenario: {scenario_anchor}\n"
         f"Dein Ziel: {goal_anchor}\n"
         f"Sprache: {lang_name} ({lang}).\n"
-        f"INTERAKTIONSKONTEXT: create_comment(post_id) / like_* / dislike_*; "
-        f"kein search/refresh, kein doppelter Essay.\n"
+        f"Runde: {round_n}.\n"
+        f"{interact}"
+        f"{pos_line}\n"
         f"FEED-KONTEXT (verbindliche post_ids / comment_ids):\n{feed}\n"
         f"MEMORY-KONTEXT:\n{memory}"
         f"{env_block}"

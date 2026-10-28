@@ -81,7 +81,7 @@ LLM-Interaktionen (keine Fake-Entscheidungen): Agenten lesen den Feed und wähle
 
 - **Lokal:** `LocalAgentMemory` (Ringpuffer je Agent) + CAMEL `ChatHistoryMemory(window_size=AGENT_MEMORY_WINDOW)`
 - **Zep:** Stub unter `backend/zep/` — **nicht integriert**; Handoff-Form vorbereitet
-- **Graph:** lokale Knoten (Akteure / Themen / Aussagen) + Interaktionskanten nur belegt (`replied_to`, `agrees_with`, `disagrees_with`) im Dashboard
+- **Graph / Social Dynamics (Phase 5):** persistente Agentenpositionen + Social-Kanten nur belegt (`agrees_with`, `disagrees_with`, `responds_to`, `influenced_by`, `position_changed`); lokale `→Kommentar#id`-Refs (OASIS hat kein `parent_comment_id`)
 
 ## Verhalten ohne API-Key
 

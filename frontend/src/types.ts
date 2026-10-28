@@ -77,6 +77,16 @@ export interface KnowledgeGraph {
     replied_to?: number
     agrees_with?: number
     disagrees_with?: number
+    responds_to?: number
+    influenced_by?: number
+    position_changed?: number
+  }
+  social_relations?: {
+    agrees_with?: number
+    disagrees_with?: number
+    responds_to?: number
+    influenced_by?: number
+    position_changed?: number
   }
   nodes?: Array<{
     id: string
@@ -98,9 +108,34 @@ export interface InteractionSummary {
   replied_to?: number
   agrees_with?: number
   disagrees_with?: number
+  responds_to?: number
+  influenced_by?: number
+  position_changed?: number
   comments?: number
   post_reactions?: number
   comment_reactions?: number
+  note?: string
+}
+
+export interface AgentPosition {
+  agent_id: number
+  stance?: string
+  stance_key?: string
+  polarity?: string
+  step?: number | null
+  evidence?: string
+  evidence_kind?: string
+  changed?: boolean
+  previous_stance?: string | null
+  influenced_by_agent_ids?: number[]
+}
+
+export interface AgentPositionsSnapshot {
+  backend?: string
+  agent_count?: number
+  change_count?: number
+  positions?: AgentPosition[]
+  changes?: Array<Record<string, unknown>>
   note?: string
 }
 
@@ -146,6 +181,7 @@ export interface SimulationState {
   model_calls: ModelCallEntry[]
   cost_summary: CostSummary
   agent_memory?: AgentMemorySnapshot
+  agent_positions?: AgentPositionsSnapshot
   knowledge_graph?: KnowledgeGraph
   interaction_summary?: InteractionSummary
   oasis_reply?: OasisReplyInfo
@@ -198,6 +234,10 @@ export interface HealthResponse {
     knowledge_graph_backend?: string
     phase?: string
     oasis_reply?: OasisReplyInfo
+    social_dynamics?: {
+      persistent_positions?: boolean
+      relations_evidenced_only?: string[]
+    }
     api_key_exposed?: boolean
   }
   runtime?: {
