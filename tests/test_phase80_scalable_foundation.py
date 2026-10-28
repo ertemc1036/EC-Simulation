@@ -119,8 +119,8 @@ def test_live_ceilings_unchanged_phase80():
     assert payload["live_test_limits"]["max_cost_usd_per_run"] == 0.20
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] == "8.0"
-    assert payload["scalable_foundation"]["persona_engine"] == "v2"
+    assert payload["society_intelligence"]["quality_fix"] in {"8.0", "8.1"}
+    assert payload["scalable_foundation"]["persona_engine"] in {"v2", "v3"}
     assert payload["scalable_foundation"]["paid_llm_unlocked"] is False
 
 
@@ -249,7 +249,7 @@ def test_simulation_intelligence_flags_ddf_issues():
         agent_positions={"polarity_distribution": {"unknown": 2}, "change_count": 0},
     )
     assert intel["phase"] == 8
-    assert intel["quality_fix"] == "8.0"
+    assert intel["quality_fix"] in {"8.0", "8.1"}
     assert intel["persona"]["issue_count"] >= 2
     assert intel["paid_llm_unlocked"] is False
 
@@ -311,7 +311,7 @@ def test_offline_manual_ddf_scenario_zero_calls(results_dir: Path):
     occs = " ".join(str(a.get("occupation") or "") for a in agents).lower()
     assert "datenschutz" not in occs
     intel = st.get("simulation_intelligence") or {}
-    assert intel.get("quality_fix") == "8.0"
+    assert intel.get("quality_fix") in {"8.0", "8.1"}
     assert intel.get("paid_llm_unlocked") is False
     plan = st.get("cost_plan") or {}
     assert plan.get("planned_cost_usd") == 0.0
@@ -365,7 +365,7 @@ def test_phase731_fixture_reingest_still_ok():
     snap = eng.snapshot()
     assert snap["repetition_blocks"] == 0
     assert snap["argument_count"] == 6
-    assert snap["quality_fix"] in {"7.3.2", "8.0"}
+    assert snap["quality_fix"] in {"7.3.2", "8.0", "8.1"}
 
 
 def test_phase732_fixture_positions_documented():
@@ -373,6 +373,6 @@ def test_phase732_fixture_positions_documented():
         pytest.skip("7.3.2 fixture missing")
     data = json.loads(LIVE_FIXTURE_732.read_text(encoding="utf-8"))
     # Historical fixture keeps its pre-8.0 quality_fix tag.
-    assert data["meta"]["quality_fix"] in {"7.3.1", "7.3.2", "8.0"}
+    assert data["meta"]["quality_fix"] in {"7.3.1", "7.3.2", "8.0", "8.1"}
     agents = generate_dynamic_agents(data["meta"]["scenario"], 3)
     assert all(a.role_label != "Moderator" for a in agents)

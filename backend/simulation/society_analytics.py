@@ -54,8 +54,8 @@ def build_society_analytics(
 
     return {
         "phase": 8,
-        "quality_fix": "8.0",
-        "persona_engine": "v2",
+        "quality_fix": "8.1",
+        "persona_engine": "v3",
         "backend": "local",
         "execution_kind": execution_kind,
         "content_synthetic": execution_kind in {"manual", "scripted"},
@@ -125,7 +125,7 @@ def build_society_analytics(
             "social_edge_total": sum(int(v or 0) for v in social.values()),
         },
         "note": (
-            "Society Analytics (Phase 8.0). Offline 10/25/50 × ≤4 Runden. "
+            "Society Analytics (Phase 8.1). Offline 10/25/50 × ≤4 Runden. "
             "Live-Ceilings unverändert; paid_llm_unlocked=false; kein Zep."
         ),
     }

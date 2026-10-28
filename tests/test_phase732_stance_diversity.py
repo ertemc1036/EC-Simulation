@@ -117,7 +117,7 @@ def test_live_ceilings_unchanged_phase732():
     payload = cfg.status_payload()
     assert payload["llm_run_requires_approval"] is True
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
-    assert payload["society_intelligence"]["quality_fix"] in {"7.3.2", "8.0"}
+    assert payload["society_intelligence"]["quality_fix"] in {"7.3.2", "8.0", "8.1"}
 
 
 def test_fixture_documents_role_and_stance_failures():
@@ -316,7 +316,7 @@ def test_phase731_fixture_reingest_regression():
     snap = eng.snapshot()
     assert snap["repetition_blocks"] == 0
     assert snap["argument_count"] == 6
-    assert snap["quality_fix"] in {"7.3.2", "8.0"}
+    assert snap["quality_fix"] in {"7.3.2", "8.0", "8.1"}
 
 
 def test_offline_manual_live_scenario_zero_cost(results_dir: Path):
@@ -335,7 +335,7 @@ def test_offline_manual_live_scenario_zero_cost(results_dir: Path):
     assert state["status"] in {"completed", "limit_reached"}
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"7.3.2", "8.0"}
+    assert data["meta"]["quality_fix"] in {"7.3.2", "8.0", "8.1"}
     assert int(data["cost_summary"].get("api_calls") or 0) == 0
     assert float(data["cost_summary"].get("estimated_cost_usd") or 0) == 0.0
     agents = data["agents"]

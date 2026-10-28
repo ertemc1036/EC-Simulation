@@ -7,6 +7,9 @@ Phase 8.0 Persona Engine V2: education stakeholders (Lehrkräfte/Eltern/
 Bildungsforscher), topic-noun denylist (Datenschutz≠Stakeholder), German
 individual pools, declined-form canon — fixes live fixture ddfedb31.
 
+Phase 8.1 Persona Diversity V3: cycle domain stakeholders at 10/25/50,
+expanded education individual pools, unique names at scale.
+
 Modes:
 - ``fixed_test`` — exactly the Phase-1/2 DEFAULT_AGENTS roster (5), for regression.
 - ``dynamic`` — scenario-derived unique profiles (default for configurable counts).
@@ -966,16 +969,26 @@ _INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
         {"first": "Elena", "last": "Popov", "age": 30, "occupation": "Lieferdienst-Dispatcherin"},
         {"first": "Ben", "last": "Adler", "age": 23, "occupation": "App-Lieferfahrer"},
     ],
-    # Phase 8.0 education (fixture ddfedb31).
+    # Phase 8.0/8.1 education (fixture ddfedb31 + scale pools).
     "lehrkraefte": [
         {"first": "Sabine", "last": "Keller", "age": 44, "occupation": "Gymnasiallehrerin"},
         {"first": "Markus", "last": "Brandt", "age": 51, "occupation": "Realschullehrer"},
         {"first": "Fatima", "last": "Hassan", "age": 37, "occupation": "Grundschullehrerin"},
+        {"first": "Henning", "last": "Voigt", "age": 48, "occupation": "Berufsschullehrer"},
+        {"first": "Aylin", "last": "Öztürk", "age": 33, "occupation": "Förderschullehrerin"},
+        {"first": "Claudia", "last": "Mertens", "age": 55, "occupation": "Schulleiterin"},
+        {"first": "Björn", "last": "Hansen", "age": 42, "occupation": "Physiklehrer"},
+        {"first": "Nadine", "last": "Scholz", "age": 29, "occupation": "Referendarin"},
     ],
     "eltern": [
         {"first": "Thomas", "last": "Bauer", "age": 41, "occupation": "Elternteil / IT-Projektleiter"},
         {"first": "Sandra", "last": "Klein", "age": 38, "occupation": "Mutter / Pflegefachkraft"},
         {"first": "Diego", "last": "Morales", "age": 45, "occupation": "Vater / Handwerksmeister"},
+        {"first": "Katrin", "last": "Engel", "age": 36, "occupation": "Mutter / Buchhalterin"},
+        {"first": "Omar", "last": "Farouk", "age": 43, "occupation": "Vater / Taxifahrer"},
+        {"first": "Birgit", "last": "Lange", "age": 50, "occupation": "Mutter / Verwaltungsangestellte"},
+        {"first": "Stefan", "last": "Krüger", "age": 39, "occupation": "Vater / Lagerist"},
+        {"first": "Yasemin", "last": "Yilmaz", "age": 34, "occupation": "Mutter / Ärztin"},
     ],
     "bildungsforscher": [
         {
@@ -996,11 +1009,32 @@ _INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
             "age": 39,
             "occupation": "Bildungssoziologin",
         },
+        {
+            "first": "Prof. Erik",
+            "last": "Neumann",
+            "age": 58,
+            "occupation": "Empirischer Bildungsforscher",
+        },
+        {
+            "first": "Dr. Hannah",
+            "last": "Vogel",
+            "age": 41,
+            "occupation": "Digitalisierungsforscherin Bildung",
+        },
+        {
+            "first": "Dr. Cem",
+            "last": "Aydın",
+            "age": 44,
+            "occupation": "Bildungsökonom",
+        },
     ],
     "schueler": [
         {"first": "Lea", "last": "Sommer", "age": 16, "occupation": "Schülerin Klasse 10"},
         {"first": "Jonas", "last": "Krüger", "age": 15, "occupation": "Schüler Klasse 9"},
         {"first": "Amira", "last": "Said", "age": 17, "occupation": "Schülerin Klasse 11"},
+        {"first": "Tom", "last": "Becker", "age": 14, "occupation": "Schüler Klasse 8"},
+        {"first": "Maya", "last": "Nguyen", "age": 16, "occupation": "Schülerin Klasse 10"},
+        {"first": "Luis", "last": "Hoffmann", "age": 15, "occupation": "Schüler Klasse 9"},
     ],
 }
 
@@ -1024,6 +1058,7 @@ _DEFAULT_STAKEHOLDERS_EDUCATION = (
     "Lehrkräfte",
     "Eltern",
     "Bildungsforscher",
+    "Schüler",
 )
 
 # Instruction / test-prompt stems that must never become agent names.
@@ -1426,7 +1461,11 @@ def _pad_roles_for_domain(
     domain: str,
     target: int,
 ) -> list[str]:
-    """Fill missing seats with domain stakeholders before Moderator archetypes."""
+    """Fill missing seats with domain stakeholders before Moderator archetypes.
+
+    Phase 8.1: after unique families are present, cycle domain stakeholders so
+    10/25/50 societies keep stakeholder coverage (not only archetypes).
+    """
     if target <= len(roles):
         return roles[:target]
     if domain == "income":
@@ -1447,6 +1486,12 @@ def _pad_roles_for_domain(
             continue
         out.append(role)
         seen_families.add(fam)
+    # V3: cycle stakeholders for remaining scale seats (diversity at 10/25/50).
+    if len(out) < target and pad:
+        i = 0
+        while len(out) < target:
+            out.append(pad[i % len(pad)])
+            i += 1
     return out
 
 

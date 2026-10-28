@@ -1,10 +1,12 @@
-"""Phase 8.0 — Cost & Token Planner (offline-safe, paid LLM never unlocked).
+"""Phase 8.0/8.1 — Cost & Token Planner V3 (offline-safe, paid LLM never unlocked).
 
 Plans call/token/USD budgets for N×R before a run. Live ceilings stay fixed;
-offline/scripted plans remain synthetic ($0 provider).
+offline/scripted plans remain synthetic ($0 provider). Phase 8.1 adds
+wave-aware accounting (planned_waves, calls_per_wave).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
@@ -17,6 +19,7 @@ from backend.config import (
     OFFLINE_MAX_ROUNDS,
     OFFLINE_SCALE_PRESETS,
 )
+from backend.simulation.social_scheduler import DEFAULT_WAVE_SIZE, wave_count_for
 
 ExecutionKind = Literal["live_llm", "manual", "scripted"]
 
@@ -42,6 +45,11 @@ class CostTokenPlan:
     paid_llm_unlocked: bool
     offline_presets: tuple[int, ...]
     note: str
+    # Phase 8.1 wave accounting
+    wave_size: int = DEFAULT_WAVE_SIZE
+    planned_waves: int = 0
+    calls_per_wave: int = 0
+    planner_version: int = 3
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -55,6 +63,7 @@ def plan_run(
     price_input_per_1m: float = 0.40,
     price_output_per_1m: float = 1.60,
     max_tokens_per_call: int = _LIVE_MAX_TOKENS_CALL,
+    wave_size: int = DEFAULT_WAVE_SIZE,
 ) -> CostTokenPlan:
     """Deterministic budget plan — Manual/Scripted = 0 provider cost."""
     kind: ExecutionKind = execution_kind
@@ -63,6 +72,7 @@ def plan_run(
 
     n = max(1, int(agent_count))
     r = max(1, int(rounds))
+    w_size = max(1, int(wave_size))
     live_clamp = False
 
     if kind == "live_llm":
@@ -86,9 +96,12 @@ def plan_run(
             and planned_tokens <= _LIVE_MAX_TOKENS_RUN
             and planned_cost <= _LIVE_MAX_COST_USD
         )
+        waves_per_round = wave_count_for(n, w_size)
+        planned_waves = waves_per_round * r
+        calls_per_wave = min(n, w_size)
         note = (
-            "Live-LLM-Plan unter festen Ceilings 5/2/10/20k/500/$0.20 — "
-            "Freigabe nötig; paid_llm_unlocked=false."
+            "Live-LLM-Plan V3 unter festen Ceilings 5/2/10/20k/500/$0.20 — "
+            "Freigabe nötig; paid_llm_unlocked=false; Wellen advisory."
         )
     else:
         n = min(n, OFFLINE_MAX_AGENTS)
@@ -99,8 +112,12 @@ def plan_run(
         planned_tokens = planned_calls * tok_call if kind == "scripted" else 0
         planned_cost = 0.0
         within = True
+        waves_per_round = wave_count_for(n, w_size)
+        planned_waves = waves_per_round * r
+        calls_per_wave = min(n, w_size) if kind == "scripted" else 0
         note = (
-            "Offline/Scripted-Plan: Provider-Calls=$0. "
+            "Offline/Scripted-Plan V3: Provider-Calls=$0; "
+            f"Wellen={planned_waves} (size={w_size}). "
             f"Presets {list(OFFLINE_SCALE_PRESETS)}; Live-Ceilings unverändert."
         )
 
@@ -117,6 +134,10 @@ def plan_run(
         paid_llm_unlocked=False,
         offline_presets=tuple(OFFLINE_SCALE_PRESETS),
         note=note,
+        wave_size=w_size,
+        planned_waves=planned_waves,
+        calls_per_wave=calls_per_wave,
+        planner_version=3,
     )
 
 
@@ -125,7 +146,7 @@ def planner_status_payload(
     price_input_per_1m: float = 0.40,
     price_output_per_1m: float = 1.60,
 ) -> dict[str, Any]:
-    """Public /api/health fragment for Cost & Token Planner."""
+    """Public /api/health fragment for Cost & Token Planner V3."""
     sample_live = plan_run(
         agent_count=LIVE_TEST_MAX_AGENTS,
         rounds=LIVE_TEST_MAX_ROUNDS,
@@ -140,7 +161,9 @@ def planner_status_payload(
     )
     return {
         "enabled": True,
+        "version": 3,
         "paid_llm_unlocked": False,
+        "wave_size": DEFAULT_WAVE_SIZE,
         "live_ceilings": {
             "max_agents": LIVE_TEST_MAX_AGENTS,
             "max_rounds": LIVE_TEST_MAX_ROUNDS,
@@ -155,11 +178,12 @@ def planner_status_payload(
             "max_rounds": OFFLINE_MAX_ROUNDS,
             "presets": list(OFFLINE_SCALE_PRESETS),
             "paid_llm_unlocked": False,
+            "sample_waves_n50": wave_count_for(50),
         },
         "sample_live_plan": sample_live.to_dict(),
         "sample_offline_plan": sample_offline.to_dict(),
         "note": (
-            "Phase-8.0 Cost & Token Planner — plant Budgets vor dem Lauf; "
+            "Phase-8.1 Cost & Token Planner V3 — Budgets + Wellen vor dem Lauf; "
             "hebt Live-Ceilings nicht an."
         ),
     }

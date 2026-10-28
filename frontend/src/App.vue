@@ -142,9 +142,11 @@ const societyOverview = computed(() => {
     relationship_bonds: sim.value?.relationships?.bond_count ?? 0,
     opinion_rounds_tracked: sim.value?.opinion_dynamics?.rounds_tracked ?? 0,
     analytics_kpis: sim.value?.society_analytics?.kpis || {},
-    persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v2',
-    quality_fix: '8.0',
+    persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v3',
+    quality_fix: '8.1',
     planned_cost_usd: sim.value?.cost_plan?.planned_cost_usd ?? 0,
+    planned_waves: sim.value?.cost_plan?.planned_waves ?? 0,
+    scheduler_waves_executed: sim.value?.scheduler?.waves_executed ?? 0,
     intelligence_kpis: sim.value?.simulation_intelligence?.kpis || {},
   }
 })
@@ -458,9 +460,9 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-8.0 Scalable Foundation — Persona Engine V2, skalierbarer Scheduler,
-        Cost/Token-Planner und Simulation Intelligence (Offline 10/25/50 × ≤4).
-        Live-LLM bleibt ≤5 · paid_llm_unlocked=false.
+        Phase-8.1 Controlled Multi-Agent Scaling — Scheduler V3 in Execution,
+        Interaction Engine, Persona Diversity V3, Cost Planner V3
+        (Offline 10/25/50 × ≤4). Live-LLM bleibt ≤5 · paid_llm_unlocked=false.
       </p>
     </header>
 
@@ -1003,11 +1005,11 @@ onUnmounted(() => {
     <section class="analytics" v-if="societyAnalytics || analyticsKpis">
       <h2>Society Analytics</h2>
       <p class="lede-sm">
-        Phase-8.0 Kennzahlen — Memory, Beziehungen, Meinungsdynamik, Planner.
+        Phase-8.1 Kennzahlen — Memory, Beziehungen, Meinungsdynamik, Planner V3.
         Offline-Scale {{ societyAnalytics?.scale?.agent_count ?? societyOverview?.agent_count ?? '—' }}
         Agenten × ≤{{ societyAnalytics?.scale?.offline_max_rounds ?? 4 }} Runden ·
         paid_llm_unlocked={{ societyAnalytics?.scale?.paid_llm_unlocked === false ? 'false' : '—' }}
-        · Persona {{ sim?.simulation_intelligence?.persona_engine || societyOverview?.persona_engine || 'v2' }}
+        · Persona {{ sim?.simulation_intelligence?.persona_engine || societyOverview?.persona_engine || 'v3' }}
       </p>
       <div class="society-grid" v-if="analyticsKpis">
         <div>
@@ -1036,10 +1038,10 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <h3>Simulation Intelligence &amp; Cost Plan</h3>
+      <h3>Simulation Intelligence &amp; Cost Plan V3</h3>
       <div class="society-grid" v-if="simulationIntelligence || costPlan">
         <div>
-          <span class="k">Persona Diversity</span>
+          <span class="k">Persona Diversity V3</span>
           <span class="v mono">{{ simulationIntelligence?.persona?.diversity_score ?? '—' }}</span>
         </div>
         <div>
@@ -1047,8 +1049,16 @@ onUnmounted(() => {
           <span class="v mono">{{ simulationIntelligence?.persona?.issue_count ?? 0 }}</span>
         </div>
         <div>
-          <span class="k">Scheduler Waves</span>
-          <span class="v mono">{{ sim?.scheduler?.waves ?? simulationIntelligence?.scheduler?.waves ?? 0 }}</span>
+          <span class="k">Waves Planned</span>
+          <span class="v mono">{{ sim?.scheduler?.waves_planned ?? sim?.scheduler?.waves ?? simulationIntelligence?.scheduler?.waves_planned ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Waves Executed</span>
+          <span class="v mono">{{ sim?.scheduler?.waves_executed ?? simulationIntelligence?.scheduler?.waves_executed ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Planned Waves (Cost)</span>
+          <span class="v mono">{{ costPlan?.planned_waves ?? societyOverview?.planned_waves ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Planned Calls</span>
@@ -1061,6 +1071,14 @@ onUnmounted(() => {
         <div>
           <span class="k">paid_llm_unlocked</span>
           <span class="v mono">{{ costPlan?.paid_llm_unlocked === false ? 'false' : '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Interaction Engine</span>
+          <span class="v mono">{{ sim?.interaction_engine?.backend ?? simulationIntelligence?.interaction_engine?.backend ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Exec Path</span>
+          <span class="v mono">{{ sim?.interaction_engine?.path ?? simulationIntelligence?.interaction_engine?.path ?? '—' }}</span>
         </div>
       </div>
       <p v-else class="empty">Intelligence nach Offline-Lauf sichtbar.</p>
