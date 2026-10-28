@@ -686,7 +686,7 @@ class SimulationEngine:
                 "offline_max_agents": OFFLINE_MAX_AGENTS,
                 "paid_llm_unlocked_for_scale": False,
                 "persona_engine": "v4",
-                "quality_fix": "8.3",
+                "quality_fix": "8.4",
             }
             seed_positions = self._positions.positions_payload()
             self.state = SimulationState(
@@ -1656,6 +1656,7 @@ class SimulationEngine:
             motivation_coverage=float(
                 (iq.get("components") or {}).get("persona_motivation_coverage") or 0.0
             ),
+            weak_overlap_rate=float(grounded.get("weak_overlap_rate") or 0.0),
         )
         self._opinion.record_round(
             step=sync_step,
@@ -1772,7 +1773,7 @@ class SimulationEngine:
             ),
             "analytics_kpis": (self.state.society_analytics or {}).get("kpis") or {},
             "persona_engine": "v4",
-            "quality_fix": "8.3",
+            "quality_fix": "8.4",
             "planned_cost_usd": cost_plan.planned_cost_usd,
             "planned_waves": cost_plan.planned_waves,
             "intelligence_kpis": (self.state.simulation_intelligence or {}).get("kpis")
@@ -1828,7 +1829,7 @@ class SimulationEngine:
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
                 "phase": 8,
-                "quality_fix": "8.3",
+                "quality_fix": "8.4",
                 "persona_engine": "v4",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
@@ -1897,7 +1898,7 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "8.3",
+                    "quality_fix": "8.4",
                     "persona_engine": "v4",
                     "topic_aware_personas": True,
                     "individual_personas": True,
@@ -1910,10 +1911,13 @@ class SimulationEngine:
                     "debate_engine_v2": True,
                     "stance_classification_v2": True,
                     "stance_classification_v3": True,
+                    "stance_classification_v4": True,
                     "opinion_dynamics_v2": True,
                     "opinion_dynamics_v3": True,
+                    "opinion_dynamics_v4": True,
                     "persona_motivation_v4": True,
                     "argument_grounded_interaction_v3": True,
+                    "argument_grounded_interaction_v4": True,
                     "interaction_quality_evaluation": True,
                     "quality_dashboard": True,
                     "cost_token_planner": True,

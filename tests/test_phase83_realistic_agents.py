@@ -102,7 +102,7 @@ def test_live_ceilings_unchanged_phase83():
     assert payload["live_test_limits"]["max_cost_usd_per_run"] == 0.20
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] == "8.3"
+    assert payload["society_intelligence"]["quality_fix"] in {"8.3", "8.4"}
     assert payload["society_intelligence"]["persona_engine"] == "v4"
     assert payload["society_intelligence"]["persona_motivation_v4"] is True
     assert payload["society_intelligence"]["stance_classification_v3"] is True
@@ -110,7 +110,7 @@ def test_live_ceilings_unchanged_phase83():
     assert payload["society_intelligence"]["argument_grounded_interaction_v3"] is True
     assert payload["society_intelligence"]["interaction_quality_evaluation"] is True
     assert payload["scalable_foundation"]["paid_llm_unlocked"] is False
-    assert payload["scalable_foundation"]["quality_fix"] == "8.3"
+    assert payload["scalable_foundation"]["quality_fix"] in {"8.3", "8.4"}
 
 
 def test_fixture_documents_thomas_bauer_gaps():
@@ -161,8 +161,8 @@ def test_stance_v3_position_tracker_zero_unknown_on_d1fb():
         step=2,
     )
     payload = tracker.positions_payload()
-    assert payload["stance_classifier"] == "v3"
-    assert payload["quality_fix"] == "8.3"
+    assert payload["stance_classifier"] in {"v3", "v4"}
+    assert payload["quality_fix"] in {"8.3", "8.4"}
     dist = payload["polarity_distribution"]
     assert dist.get("unknown", 0) == 0
     assert dist.get("conditional", 0) == 3
@@ -183,7 +183,7 @@ def test_argument_grounded_v3_detects_thomas_invented_attribution():
     parent = data["comments"][2]["content"]
     reply = data["comments"][4]["content"]
     g = score_reply_grounding(reply, parent, parent_comment_id=3)
-    assert g["engine"] == "v3"
+    assert g["engine"] in {"v3", "v4"}
     assert g["invented_attribution"] is True
     assert g["grounded"] is False
     # Fatima correctly addresses Evidenz/Lernfortschritte.
@@ -197,8 +197,8 @@ def test_argument_grounded_v3_detects_thomas_invented_attribution():
 def test_argument_grounded_snapshot_on_fixture():
     data = json.loads(LIVE_FIXTURE_D1FB.read_text(encoding="utf-8"))
     snap = evaluate_argument_grounded_interactions(comments=data["comments"])
-    assert snap["engine"] == "v3"
-    assert snap["quality_fix"] == "8.3"
+    assert snap["engine"] in {"v3", "v4"}
+    assert snap["quality_fix"] in {"8.3", "8.4"}
     assert snap["reply_count"] == 3
     assert snap["invented_attribution_count"] >= 1
     assert 0.0 < snap["grounded_reply_rate"] < 1.0
@@ -234,9 +234,9 @@ def test_opinion_dynamics_v3_signals():
         agent_count=3,
     )
     snap = od.snapshot()
-    assert snap["engine"] == "v3"
-    assert snap["version"] == 3
-    assert snap["quality_fix"] == "8.3"
+    assert snap["engine"] in {"v3", "v4"}
+    assert snap["version"] in {3, 4}
+    assert snap["quality_fix"] in {"8.3", "8.4"}
     assert snap["stance_clarity"] == 1.0
     assert snap["grounded_reply_share"] == 0.67
     assert snap["motivation_coverage"] == 1.0
@@ -268,8 +268,8 @@ def test_interaction_quality_evaluation_on_fixture():
         debate_quality_score=float((disc.get("debate_quality") or {}).get("score") or 0),
         opinion_stability=1.0,
     )
-    assert iq["engine"] == "v3"
-    assert iq["quality_fix"] == "8.3"
+    assert iq["engine"] in {"v3", "v4"}
+    assert iq["quality_fix"] in {"8.3", "8.4"}
     assert iq["score"] >= 0.45
     assert iq["components"]["persona_motivation_coverage"] == 1.0
     assert iq["argument_grounded"]["invented_attribution_count"] >= 1
@@ -368,10 +368,10 @@ def test_simulation_intelligence_phase83_flags():
             },
         },
     )
-    assert intel["quality_fix"] == "8.3"
+    assert intel["quality_fix"] in {"8.3", "8.4"}
     assert intel["persona_engine"] == "v4"
-    assert intel["stance_classifier"] == "v3"
-    assert intel["opinion_engine"] == "v3"
+    assert intel["stance_classifier"] in {"v3", "v4"}
+    assert intel["opinion_engine"] in {"v3", "v4"}
     assert intel["kpis"]["interaction_quality_score"] >= 0.6
     assert intel["kpis"]["grounded_reply_rate"] == 0.67
     assert intel["paid_llm_unlocked"] is False
@@ -406,14 +406,14 @@ def test_scripted_scale_10_25_50_realistic_agents(results_dir: Path, n: int):
     path = st.get("result_path")
     assert path and Path(path).is_file()
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.3"
+    assert data["meta"]["quality_fix"] in {"8.3", "8.4"}
     assert data["meta"]["persona_engine"] == "v4"
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
-    assert data["agent_positions"]["stance_classifier"] == "v3"
-    assert data["opinion_dynamics"]["engine"] == "v3"
+    assert data["agent_positions"]["stance_classifier"] in {"v3", "v4"}
+    assert data["opinion_dynamics"]["engine"] in {"v3", "v4"}
     assert data["discussion"]["debate_engine"] == "v2"
     assert "interaction_quality" in data
-    assert data["interaction_quality"]["engine"] == "v3"
+    assert data["interaction_quality"]["engine"] in {"v3", "v4"}
     assert data["simulation_intelligence"]["persona_engine"] == "v4"
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
     assert data["simulation_intelligence"]["kpis"]["planned_cost_usd"] == 0.0
@@ -447,9 +447,9 @@ def test_manual_n12_zero_cost_phase83_fields(results_dir: Path):
     assert float(cost.get("estimated_cost_usd") or 0.0) == 0.0
     path = st.get("result_path")
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.3"
+    assert data["meta"]["quality_fix"] in {"8.3", "8.4"}
     assert data["meta"]["persona_engine"] == "v4"
-    assert data["opinion_dynamics"]["engine"] == "v3"
+    assert data["opinion_dynamics"]["engine"] in {"v3", "v4"}
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
 
 

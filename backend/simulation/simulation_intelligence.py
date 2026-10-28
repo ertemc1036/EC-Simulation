@@ -1,8 +1,8 @@
-"""Phase 8.0–8.3 — Simulation Intelligence (scaling + debate + realistic agents).
+"""Phase 8.0–8.4 — Simulation Intelligence (scaling + debate + reliability).
 
 Aggregates persona motivation V4, scheduler coverage/waves-in-execution,
-cost plan V3, interaction engine, debate quality V2, stance V3, opinion V3,
-argument-grounded interaction V3, and interaction quality. No provider calls.
+cost plan V3, interaction engine, debate quality V2, stance V4, opinion V4,
+argument-grounded interaction V4, and interaction quality V4. No provider calls.
 """
 from __future__ import annotations
 
@@ -20,14 +20,14 @@ from backend.config import (
 from backend.simulation.cost_token_planner import CostTokenPlan
 
 
-QUALITY_FIX = "8.3"
+QUALITY_FIX = "8.4"
 PERSONA_ENGINE = "v4"
 DEBATE_ENGINE = "v2"
-STANCE_CLASSIFIER = "v3"
-OPINION_ENGINE = "v3"
+STANCE_CLASSIFIER = "v4"
+OPINION_ENGINE = "v4"
 ARGUMENT_ENGINE = "v2"
-GROUNDED_ENGINE = "v3"
-INTERACTION_QUALITY_ENGINE = "v3"
+GROUNDED_ENGINE = "v4"
+INTERACTION_QUALITY_ENGINE = "v4"
 
 
 def _unique_occupations(agents: list[dict[str, Any]]) -> int:
@@ -334,12 +334,13 @@ def build_simulation_intelligence(
             "invented_attribution_rate": float(
                 grounded.get("invented_attribution_rate") or 0.0
             ),
+            "weak_overlap_rate": float(grounded.get("weak_overlap_rate") or 0.0),
             "interaction_quality_score": float(iq.get("score") or 0.0),
         },
         "note": (
-            "Simulation Intelligence (Phase 8.3): Persona Motivation V4, "
-            "Argument-Grounded Interaction V3, Stance Classification V3, "
-            "Opinion Dynamics V3, Interaction Quality — offline; "
+            "Simulation Intelligence (Phase 8.4): Persona Motivation V4, "
+            "Argument-Grounded Interaction V4, Stance Classification V4, "
+            "Opinion Dynamics V4, Interaction Quality V4 — offline; "
             "Live-Ceilings unverändert; paid_llm_unlocked=false."
         ),
     }

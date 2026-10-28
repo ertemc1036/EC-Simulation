@@ -18,7 +18,7 @@ from backend.simulation.social_scheduler import (
 )
 
 
-QUALITY_FIX = "8.3"
+QUALITY_FIX = "8.4"
 
 
 class MultiAgentInteractionEngine:

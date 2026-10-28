@@ -69,7 +69,7 @@ def build_society_analytics(
     )
     return {
         "phase": 8,
-        "quality_fix": "8.3",
+        "quality_fix": "8.4",
         "persona_engine": "v4",
         "backend": "local",
         "execution_kind": execution_kind,

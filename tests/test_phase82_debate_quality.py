@@ -96,14 +96,14 @@ def test_live_ceilings_unchanged_phase82():
     assert payload["live_test_limits"]["max_cost_usd_per_run"] == 0.20
     assert payload["offline_scale"]["paid_llm_unlocked"] is False
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] in {"8.2", "8.3"}
+    assert payload["society_intelligence"]["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert payload["society_intelligence"]["argument_intelligence_v2"] is True
     assert payload["society_intelligence"]["debate_engine_v2"] is True
     assert payload["society_intelligence"]["stance_classification_v2"] is True
     assert payload["society_intelligence"]["opinion_dynamics_v2"] is True
     assert payload["society_intelligence"]["quality_dashboard"] is True
     assert payload["scalable_foundation"]["paid_llm_unlocked"] is False
-    assert payload["scalable_foundation"]["quality_fix"] in {"8.2", "8.3"}
+    assert payload["scalable_foundation"]["quality_fix"] in {"8.2", "8.3", "8.4"}
 
 
 def test_fixture_documents_stance_and_debate_gaps():
@@ -143,7 +143,7 @@ def test_stance_v2_position_tracker_zero_unknown_on_fixture():
     )
     payload = tracker.positions_payload()
     assert payload["stance_classifier"] in {"v2", "v3", "v4"}
-    assert payload["quality_fix"] in {"8.2", "8.3"}
+    assert payload["quality_fix"] in {"8.2", "8.3", "8.4"}
     dist = payload["polarity_distribution"]
     assert dist.get("unknown", 0) == 0
     assert all(
@@ -188,7 +188,7 @@ def test_argument_intelligence_v2_on_fixture():
     pol = tracker.polarity_distribution()
     snap = eng.snapshot(polarity_distribution=pol, agent_count=3)
     assert snap["debate_engine"] == "v2"
-    assert snap["quality_fix"] in {"8.2", "8.3"}
+    assert snap["quality_fix"] in {"8.2", "8.3", "8.4"}
     intel = snap["argument_intelligence"]
     assert intel["engine"] == "v2"
     assert intel["argument_count"] >= 6
@@ -247,8 +247,8 @@ def test_opinion_dynamics_v2_clarity_and_stability():
     )
     snap = od.snapshot()
     assert snap["engine"] in {"v2", "v3", "v4"}
-    assert snap["version"] in {2, 3}
-    assert snap["quality_fix"] in {"8.2", "8.3"}
+    assert snap["version"] in {2, 3, 4}
+    assert snap["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert snap["stance_clarity"] == 1.0
     assert snap["unknown_share"] == 0.0
     assert 0.0 <= snap["stability_index"] <= 1.0
@@ -320,7 +320,7 @@ def test_simulation_intelligence_includes_debate_kpis():
             "rounds_tracked": 3,
         },
     )
-    assert intel["quality_fix"] in {"8.2", "8.3"}
+    assert intel["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert intel["debate_engine"] == "v2"
     assert intel["stance_classifier"] in {"v2", "v3", "v4"}
     assert intel["kpis"]["debate_quality_score"] >= 0.7
@@ -357,7 +357,7 @@ def test_scripted_scale_10_25_50_debate_quality(results_dir: Path, n: int):
     path = st.get("result_path")
     assert path and Path(path).is_file()
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"8.2", "8.3"}
+    assert data["meta"]["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert data["meta"]["society_intelligence"]["paid_llm_unlocked"] is False
     disc = data["discussion"]
     assert disc["debate_engine"] == "v2"
@@ -366,7 +366,7 @@ def test_scripted_scale_10_25_50_debate_quality(results_dir: Path, n: int):
     assert data["opinion_dynamics"]["engine"] in {"v2", "v3", "v4"}
     assert data["agent_positions"]["stance_classifier"] in {"v2", "v3", "v4"}
     intel = data["simulation_intelligence"]
-    assert intel["quality_fix"] in {"8.2", "8.3"}
+    assert intel["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert intel["paid_llm_unlocked"] is False
     assert intel["kpis"]["planned_cost_usd"] == 0.0
     # Scheduler waves still in execution (8.1 invariant).
@@ -399,7 +399,7 @@ def test_manual_n12_zero_cost_debate_fields(results_dir: Path):
     assert float(cost.get("estimated_cost_usd") or 0.0) == 0.0
     path = st.get("result_path")
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] in {"8.2", "8.3"}
+    assert data["meta"]["quality_fix"] in {"8.2", "8.3", "8.4"}
     assert data["discussion"]["debate_engine"] == "v2"
     assert data["simulation_intelligence"]["paid_llm_unlocked"] is False
 

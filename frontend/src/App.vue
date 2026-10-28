@@ -1068,7 +1068,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <h3>Quality Dashboard V3</h3>
+      <h3>Quality Dashboard V4</h3>
       <div class="society-grid" v-if="debateQuality || argumentIntelligence || simulationIntelligence">
         <div>
           <span class="k">Interaction Quality</span>
@@ -1077,6 +1077,10 @@ onUnmounted(() => {
         <div>
           <span class="k">Grounded Reply %</span>
           <span class="v mono">{{ sim?.interaction_quality?.argument_grounded?.grounded_reply_rate ?? simulationIntelligence?.kpis?.grounded_reply_rate ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Weak Overlap %</span>
+          <span class="v mono">{{ sim?.interaction_quality?.argument_grounded?.weak_overlap_rate ?? simulationIntelligence?.kpis?.weak_overlap_rate ?? '—' }}</span>
         </div>
         <div>
           <span class="k">Debate Quality</span>

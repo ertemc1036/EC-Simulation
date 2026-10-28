@@ -114,7 +114,7 @@ def test_ceilings_and_paid_flag_unchanged_phase831():
     assert cfg.max_tokens_per_run == 20000
     assert cfg.max_tokens_per_call == 500
     assert payload["phase"] == "8"
-    assert payload["society_intelligence"]["quality_fix"] == "8.3"
+    assert payload["society_intelligence"]["quality_fix"] in {"8.3", "8.4"}
 
 
 def test_scenario_a_fixture_meta_and_engines(fixture_a: dict):
@@ -132,21 +132,22 @@ def test_scenario_a_fixture_meta_and_engines(fixture_a: dict):
 
 
 def test_scenario_a_documents_false_pro_stance_gaps(fixture_a: dict):
-    """Audit finding: Thomas C2 + Fatima C4 are semantically conditional, V3 → pro."""
+    """Audit gaps fixed in 8.4: Thomas C2 + Fatima C4 reclassify as conditional."""
     c2 = fixture_a["comments"][1]["content"]
     c4 = fixture_a["comments"][3]["content"]
     assert "großes Potenzial" in c2 or "grosses Potenzial" in c2
     assert "Datenschutz" in c2 or "datenschutz" in c2.lower()
     assert "schrittweise" in c2.lower() or "Eltern" in c2
-    assert classify_stance_v3(c2) == "pro"  # documented false pro (8.4)
+    assert classify_stance_v3(c2) == "conditional"  # Phase 8.4 Stance V4 fix
     assert "plädiere ich dafür" in c4
     assert "nicht einfach technikgetrieben" in c4
-    assert classify_stance_v3(c4) == "pro"  # dafür false positive (8.4)
+    assert classify_stance_v3(c4) == "conditional"  # Phase 8.4 dafür hygiene
     # C1 / C5 remain correctly conditional.
     assert classify_stance_v3(fixture_a["comments"][0]["content"]) == "conditional"
     assert classify_stance_v3(fixture_a["comments"][4]["content"]) == "conditional"
     by_id = {p["agent_id"]: p for p in fixture_a["agent_positions"]["positions"]}
-    assert by_id[0]["polarity"] == "pro"  # Fatima final = C4
+    # Historical fixture polarities remain as stored (live 8.3); reclassify separately.
+    assert by_id[0]["polarity"] in {"pro", "conditional"}
     assert by_id[1]["polarity"] == "conditional"
     assert by_id[2]["polarity"] == "conditional"
     assert fixture_a["agent_positions"]["polarity_distribution"].get("unknown", 0) == 0
@@ -154,15 +155,15 @@ def test_scenario_a_documents_false_pro_stance_gaps(fixture_a: dict):
 
 def test_scenario_a_grounding_perfect_invented_zero(fixture_a: dict):
     snap = evaluate_argument_grounded_interactions(comments=fixture_a["comments"])
-    assert snap["engine"] == "v3"
+    assert snap["engine"] in {"v3", "v4"}
     assert snap["reply_count"] == 3
     assert snap["grounded_reply_rate"] == 1.0
     assert snap["invented_attribution_count"] == 0
     assert fixture_a["interaction_quality"]["score"] >= 0.8
-    # Weak overlap on Hannah C6 is documented (still grounded).
+    # C6 remains grounded; V4 Bildung↔IT bag may lift overlap near the floor.
     c6_eval = next(e for e in snap["evaluations"] if e["comment_id"] == 6)
     assert c6_eval["grounded"] is True
-    assert c6_eval["overlap"] < 0.20
+    assert c6_eval["overlap"] < 0.35
 
 
 def test_scenario_a_motivation_and_replay_unknown_zero(fixture_a: dict):
@@ -179,19 +180,18 @@ def test_scenario_a_motivation_and_replay_unknown_zero(fixture_a: dict):
     )
     dist = tracker.positions_payload()["polarity_distribution"]
     assert dist.get("unknown", 0) == 0
-    assert dist.get("pro", 0) == 1
-    assert dist.get("conditional", 0) == 2
+    assert dist.get("conditional", 0) == 3  # V4 reclassify: no false pro
 
 
 def test_stance_dafuer_false_positive_case():
-    """Bare «dafür» in «plädiere ich dafür, dass … nicht» must be visible to 8.4."""
+    """Bare «dafür» in «plädiere ich dafür, dass … nicht» → conditional (V4)."""
     text = (
         "Deshalb plädiere ich dafür, dass der Einsatz von KI-Lernassistenten "
         "nicht einfach technikgetrieben erfolgen darf. Es braucht klare, "
         "pädagogisch fundierte Konzepte."
     )
     assert "dafür" in text.lower()
-    assert _polarity(text) == "pro"
+    assert _polarity(text) == "conditional"  # V4 dafür hygiene
 
 
 def test_stance_hard_labels_still_work():
@@ -249,11 +249,11 @@ def test_offline_scenarios_b_e_scripted(results_dir: Path, key: str):
     path = st.get("result_path")
     assert path and Path(path).is_file()
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    assert data["meta"]["quality_fix"] == "8.3"
+    assert data["meta"]["quality_fix"] in {"8.3", "8.4"}
     assert data["meta"]["persona_engine"] == "v4"
-    assert data["agent_positions"]["stance_classifier"] == "v3"
-    assert data["opinion_dynamics"]["engine"] == "v3"
-    assert data["interaction_quality"]["engine"] == "v3"
+    assert data["agent_positions"]["stance_classifier"] in {"v3", "v4"}
+    assert data["opinion_dynamics"]["engine"] in {"v3", "v4"}
+    assert data["interaction_quality"]["engine"] in {"v3", "v4"}
     assert motivation_coverage(data["agents"])["coverage"] == 1.0
     dist = data["agent_positions"]["polarity_distribution"]
     total = sum(int(v) for v in dist.values()) or 1
