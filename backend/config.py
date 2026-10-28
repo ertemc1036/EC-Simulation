@@ -207,7 +207,7 @@ class Settings:
             "oasis_package": "camel-oasis",
             "mcp_pin": ">=1.3.0,<2",
             "api_key_exposed": False,
-            "phase": "7",
+            "phase": "8",
             "oasis_reply": {
                 "parent_comment_id_supported": False,
                 "reply_via": "create_comment(post_id, content)",
@@ -228,6 +228,7 @@ class Settings:
                     "position_changed",
                 ],
                 "scheduler": True,
+                "scalable_scheduler": True,
                 "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
                 "long_term_memory": True,
                 "relationship_dynamics": True,
@@ -243,7 +244,19 @@ class Settings:
                 "zep_integrated": False,
                 "intelligent_discussion": True,
                 "individual_personas": True,
-                "quality_fix": "7.3.2",
+                "persona_engine": "v2",
+                "cost_token_planner": True,
+                "simulation_intelligence": True,
+                "quality_fix": "8.0",
+            },
+            "scalable_foundation": {
+                "persona_engine": "v2",
+                "scalable_scheduler": True,
+                "cost_token_planner": True,
+                "simulation_intelligence": True,
+                "offline_presets": list(OFFLINE_SCALE_PRESETS),
+                "paid_llm_unlocked": False,
+                "quality_fix": "8.0",
             },
         }
 

@@ -134,7 +134,7 @@ def test_dynamic_count_three(results_dir: Path):
     assert state["knowledge_graph"]["edge_count"] >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] in (4, 4.1, 5, 6, 7)
+    assert data["meta"]["phase"] in (4, 4.1, 5, 6, 7, 8)
     assert data["meta"]["zep_integrated"] is False
     assert "agent_memory" in data
     assert "knowledge_graph" in data
@@ -169,7 +169,7 @@ def test_berlin_manual_memory_and_kg(results_dir: Path):
     assert kg.get("edge_count", 0) >= 1
     path = Path(state["result_path"])
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] in (4, 4.1, 5, 6, 7)
+    assert data["meta"]["phase"] in (4, 4.1, 5, 6, 7, 8)
     assert data["meta"]["agent_generation"] == "dynamic"
     assert data["agent_memory"]["agent_count_with_memory"] >= 1
     assert data["knowledge_graph"]["node_count"] >= 5

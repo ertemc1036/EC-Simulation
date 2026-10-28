@@ -86,7 +86,7 @@ def test_live_ceilings_and_phase7_flags(results_dir: Path):
     assert OFFLINE_SCALE_PRESETS == (10, 25, 50)
     cfg = load_settings()
     payload = cfg.status_payload()
-    assert payload["phase"] == "7"
+    assert payload["phase"] in {"7", "8"}
     assert payload["live_test_limits"]["max_agents"] == 5
     assert payload["live_test_limits"]["max_model_calls"] == 10
     assert payload["live_test_limits"]["max_cost_usd_per_run"] == 0.20
@@ -258,7 +258,7 @@ def test_society_analytics_payload_shape():
         },
         scheduler={"plans": 20, "self_as_partner_count": 0},
     )
-    assert analytics["phase"] == 7
+    assert analytics["phase"] in (7, 8)
     assert analytics["scale"]["paid_llm_unlocked"] is False
     assert analytics["memory"]["zep_integrated"] is False
     assert "memory_coverage" in analytics["kpis"]
@@ -315,7 +315,7 @@ def test_scripted_offline_scale_metrics(results_dir: Path, n: int, rounds: int):
     assert len(opinion.get("chronology") or []) >= 1
 
     analytics = state["society_analytics"]
-    assert analytics["phase"] == 7
+    assert analytics["phase"] in (7, 8)
     assert analytics["scale"]["paid_llm_unlocked"] is False
     assert analytics["scale"]["agent_count"] == n
     assert analytics["kpis"]["social_edge_total"] >= 0
@@ -324,7 +324,7 @@ def test_scripted_offline_scale_metrics(results_dir: Path, n: int, rounds: int):
     # Persist meta
     path = Path(state["result_path"])
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["meta"]["phase"] == 7
+    assert payload["meta"]["phase"] in (7, 8)
     assert payload["meta"]["zep_integrated"] is False
     assert payload["meta"]["live_llm_limits_unchanged"]["max_agents"] == 5
     assert payload["meta"]["society_intelligence"]["paid_llm_unlocked"] is False

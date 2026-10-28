@@ -1,4 +1,4 @@
-"""Flask API + Socket.IO live updates for EC-Simulation Phase 7."""
+"""Flask API + Socket.IO live updates for EC-Simulation Phase 8.0."""
 from __future__ import annotations
 
 import hashlib
@@ -22,10 +22,11 @@ from backend.config import (  # noqa: E402
 )
 from backend.simulation.agent_generator import generate_agents  # noqa: E402
 from backend.simulation.agents import profiles_payload  # noqa: E402
+from backend.simulation.cost_token_planner import planner_status_payload  # noqa: E402
 from backend.simulation.engine import SimulationEngine  # noqa: E402
 
-# Fingerprint of key Phase-7 modules — dashboard can detect a stale :5001 process.
-_PHASE7_MARKERS = (
+# Fingerprint of key Phase-8 modules — dashboard can detect a stale :5001 process.
+_PHASE8_MARKERS = (
     ROOT / "backend" / "app.py",
     ROOT / "backend" / "config.py",
     ROOT / "backend" / "simulation" / "engine.py",
@@ -40,13 +41,15 @@ _PHASE7_MARKERS = (
     ROOT / "backend" / "simulation" / "social_scheduler.py",
     ROOT / "backend" / "simulation" / "scripted_model.py",
     ROOT / "backend" / "simulation" / "discussion_engine.py",
+    ROOT / "backend" / "simulation" / "cost_token_planner.py",
+    ROOT / "backend" / "simulation" / "simulation_intelligence.py",
     ROOT / "backend" / "simulation" / "prompts.py",
 )
 
 
 def _code_revision() -> str:
     h = hashlib.sha1()
-    for path in _PHASE7_MARKERS:
+    for path in _PHASE8_MARKERS:
         try:
             h.update(path.read_bytes())
         except OSError:
@@ -55,7 +58,7 @@ def _code_revision() -> str:
 
 
 CODE_REVISION = _code_revision()
-EXPECTED_PHASE = "7"
+EXPECTED_PHASE = "8"
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": settings.cors_origins}})
@@ -90,6 +93,10 @@ def health():
         oasis_error = str(exc)
 
     cfg = settings.status_payload()
+    planner = planner_status_payload(
+        price_input_per_1m=settings.price_input_per_1m,
+        price_output_per_1m=settings.price_output_per_1m,
+    )
     return jsonify(
         {
             "ok": True,
@@ -103,11 +110,14 @@ def health():
                 "openai": _pkg_version("openai"),
             },
             "config": cfg,
+            "cost_token_planner": planner,
             "runtime": {
                 "phase": cfg.get("phase") or EXPECTED_PHASE,
                 "code_revision": CODE_REVISION,
                 "expects_phase": EXPECTED_PHASE,
                 "port": settings.flask_port,
+                "persona_engine": "v2",
+                "quality_fix": "8.0",
             },
             "zep": engine.zep.status,
         }
