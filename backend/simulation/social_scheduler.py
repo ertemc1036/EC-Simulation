@@ -1,8 +1,8 @@
-"""Phase 6 — Social Interaction Scheduler (deterministic, offline-safe).
+"""Phase 6 + 8.0 — Scalable Social Interaction Scheduler (deterministic).
 
 Chooses what each agent reads and whom they interact with. Inter-agent
-partners are never the agent itself. Used by ScriptedReactiveModel and
-exposed in run state for the dashboard.
+partners are never the agent itself. Phase 8.0 adds wave/batch round
+planning for offline 10/25/50 without unlocking paid Live-LLM.
 """
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from typing import Any
 
 
 OFFLINE_SCALE_PRESETS = (10, 25, 50)
+# Wave size for scalable offline rounds (Live still serializes via semaphore=1).
+DEFAULT_WAVE_SIZE = 10
 
 
 def _stable_rank(seed: str, item: int) -> int:
@@ -40,14 +42,17 @@ class InteractionPlan:
 class SocialInteractionScheduler:
     """Deterministic partner / target selection without self-as-partner."""
 
-    def __init__(self, *, scenario: str = "") -> None:
+    def __init__(self, *, scenario: str = "", wave_size: int = DEFAULT_WAVE_SIZE) -> None:
         self.scenario = scenario or ""
+        self.wave_size = max(1, int(wave_size))
         self._plans: list[dict[str, Any]] = []
         self._pair_counts: dict[tuple[int, int], int] = {}
+        self._waves: list[dict[str, Any]] = []
 
     def clear(self) -> None:
         self._plans.clear()
         self._pair_counts.clear()
+        self._waves.clear()
 
     def _seed(self, agent_id: int, round_n: int, kind: str) -> str:
         return f"{self.scenario}|{agent_id}|{round_n}|{kind}"
@@ -228,6 +233,43 @@ class SocialInteractionScheduler:
         self._plans.append(plan.to_dict())
         return plan
 
+    def plan_round(
+        self,
+        *,
+        round_n: int,
+        agent_ids: list[int],
+        posts: list[dict[str, Any]],
+        comments: list[dict[str, Any]],
+    ) -> list[InteractionPlan]:
+        """Batch-plan an entire round in deterministic waves (Phase 8.0)."""
+        ids = sorted({int(a) for a in agent_ids})
+        plans: list[InteractionPlan] = []
+        wave_idx = 0
+        for start in range(0, len(ids), self.wave_size):
+            wave = ids[start : start + self.wave_size]
+            wave_plans: list[dict[str, Any]] = []
+            for offset, aid in enumerate(wave):
+                p = self.plan(
+                    agent_id=aid,
+                    round_n=round_n,
+                    agent_ids=ids,
+                    posts=posts,
+                    comments=comments,
+                    call_index=offset + 1,
+                )
+                plans.append(p)
+                wave_plans.append(p.to_dict())
+            self._waves.append(
+                {
+                    "round": round_n,
+                    "wave": wave_idx,
+                    "agent_ids": wave,
+                    "plans": len(wave_plans),
+                }
+            )
+            wave_idx += 1
+        return plans
+
     def summary(self) -> dict[str, Any]:
         self_hits = sum(
             1
@@ -235,15 +277,26 @@ class SocialInteractionScheduler:
             if p.get("partner_agent_id") is not None
             and p.get("partner_agent_id") == p.get("agent_id")
         )
+        agents_planned = {int(p["agent_id"]) for p in self._plans if "agent_id" in p}
+        pair_loads = list(self._pair_counts.values()) if self._pair_counts else [0]
         return {
-            "backend": "local_scheduler",
+            "backend": "local_scheduler_v2",
+            "scalable": True,
+            "wave_size": self.wave_size,
+            "waves": len(self._waves),
+            "recent_waves": self._waves[-12:],
             "plans": len(self._plans),
             "unique_pairs": len(self._pair_counts),
+            "pair_load_max": max(pair_loads),
+            "pair_load_mean": round(sum(pair_loads) / max(1, len(pair_loads)), 3),
+            "agent_coverage": len(agents_planned),
             "self_as_partner_count": self_hits,
             "self_reference_blocked": True,
+            "offline_scale_presets": list(OFFLINE_SCALE_PRESETS),
             "recent": self._plans[-24:],
             "note": (
-                "Deterministischer Social Interaction Scheduler: "
-                "Lesen, Partnerwahl, Ziele — Inter-Agent nie Selbstreferenz."
+                "Scalable Social Interaction Scheduler (Phase 8.0): "
+                "Wellenplanung, Partner-Balance, keine Selbstreferenz — "
+                "Live-Ceilings unverändert."
             ),
         }

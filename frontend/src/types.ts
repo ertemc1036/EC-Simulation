@@ -170,17 +170,26 @@ export interface SocietyOverview {
   offline_max_agents?: number
   paid_llm_unlocked_for_scale?: boolean
   scheduler_plans?: number
+  scheduler_waves?: number
   self_as_partner_count?: number
   long_term_memory_agents?: number
   relationship_bonds?: number
   opinion_rounds_tracked?: number
   analytics_kpis?: Record<string, number>
+  persona_engine?: string
+  quality_fix?: string
+  planned_cost_usd?: number
+  intelligence_kpis?: Record<string, number>
 }
 
 export interface SchedulerSnapshot {
   backend?: string
+  scalable?: boolean
+  wave_size?: number
+  waves?: number
   plans?: number
   unique_pairs?: number
+  agent_coverage?: number
   self_as_partner_count?: number
   self_reference_blocked?: boolean
   recent?: Array<Record<string, unknown>>
@@ -258,6 +267,8 @@ export interface OpinionDynamicsSnapshot {
 
 export interface SocietyAnalytics {
   phase?: number
+  quality_fix?: string
+  persona_engine?: string
   execution_kind?: string
   scale?: {
     agent_count?: number
@@ -277,6 +288,38 @@ export interface SocietyAnalytics {
     opinion_volatility?: number
     social_edge_total?: number
   }
+  note?: string
+}
+
+export interface CostTokenPlan {
+  agent_count?: number
+  rounds?: number
+  execution_kind?: string
+  planned_calls?: number
+  planned_tokens?: number
+  planned_cost_usd?: number
+  within_live_ceilings?: boolean
+  live_clamp_applied?: boolean
+  paid_llm_unlocked?: boolean
+  note?: string
+}
+
+export interface SimulationIntelligence {
+  phase?: number
+  quality_fix?: string
+  persona_engine?: string
+  paid_llm_unlocked?: boolean
+  persona?: {
+    diversity_score?: number
+    issue_count?: number
+    unique_role_labels?: number
+    unique_occupations?: number
+    ok?: boolean
+  }
+  scheduler?: Record<string, unknown>
+  cost_plan?: CostTokenPlan
+  kpis?: Record<string, number>
+  scale?: Record<string, unknown>
   note?: string
 }
 
@@ -307,6 +350,8 @@ export interface SimulationState {
   relationships?: RelationshipsSnapshot
   opinion_dynamics?: OpinionDynamicsSnapshot
   society_analytics?: SocietyAnalytics
+  simulation_intelligence?: SimulationIntelligence
+  cost_plan?: CostTokenPlan
   knowledge_graph?: KnowledgeGraph
   interaction_summary?: InteractionSummary
   oasis_reply?: OasisReplyInfo
@@ -422,15 +467,29 @@ export interface HealthResponse {
       zep_integrated?: boolean
       intelligent_discussion?: boolean
       individual_personas?: boolean
+      persona_engine?: string
+      cost_token_planner?: boolean
+      simulation_intelligence?: boolean
+      quality_fix?: string
+    }
+    scalable_foundation?: {
+      persona_engine?: string
+      scalable_scheduler?: boolean
+      cost_token_planner?: boolean
+      simulation_intelligence?: boolean
+      paid_llm_unlocked?: boolean
       quality_fix?: string
     }
     api_key_exposed?: boolean
   }
+  cost_token_planner?: CostTokenPlan & Record<string, unknown>
   runtime?: {
     phase?: string
     code_revision?: string
     expects_phase?: string
     port?: number
+    persona_engine?: string
+    quality_fix?: string
   }
   zep: Record<string, unknown>
 }

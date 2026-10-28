@@ -107,7 +107,7 @@ def test_live_ceilings_unchanged_phase71():
 def test_bad_run_fixture_documents_pre_fix_failure():
     assert BAD_RUN.is_file(), f"missing fixture {BAD_RUN}"
     data = json.loads(BAD_RUN.read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 7
+    assert data["meta"]["phase"] in (7, 8)
     assert len(data["posts"]) <= 3
     pol = data["agent_positions"]["polarity_distribution"]
     assert int(pol.get("uncertain", 0)) >= 40
@@ -142,7 +142,7 @@ def test_three_topics_yield_different_discussions():
     specs = [
         (BGE, "income", "grundeinkommen"),
         (BERLIN, "mobility", "verbot"),
-        (KI_THESE, "generic", "ki"),
+        (KI_THESE, "education", "ki"),
     ]
     fingerprints: list[str] = []
     for scenario, domain, needle in specs:

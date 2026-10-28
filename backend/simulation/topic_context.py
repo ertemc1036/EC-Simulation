@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-TopicDomain = Literal["mobility", "income", "labor", "generic"]
+TopicDomain = Literal["mobility", "income", "labor", "education", "generic"]
 
 _MOBILITY_CUES = (
     "verbot",
@@ -50,6 +50,23 @@ _LABOR_CUES = (
     "vollzeitwoche",
     "work-life",
     "worklife",
+)
+# Education / school AI theses (Phase 8.0 / fixture ddfedb31).
+_EDUCATION_CUES = (
+    "schule",
+    "schulen",
+    "schulisch",
+    "lehrkraft",
+    "lehrkräfte",
+    "lehrkraeften",
+    "lehrkräften",
+    "bildungsforscher",
+    "bildungsforschung",
+    "lernassistent",
+    "ki-lern",
+    "schulreform",
+    "digitalunterricht",
+    "unterricht",
 )
 
 # Instruction / meta verbs that must not become topic keywords or agent names.
@@ -120,7 +137,12 @@ _MOBILITY_ONLY_MARKERS = (
     "durchgangsverkehr",
 )
 _HOUSING_ONLY_MARKERS = ("mietendeckel", "mietpreisbremse")
-_EDU_ONLY_MARKERS = ("schulreform",)
+_EDU_ONLY_MARKERS = (
+    "schulreform",
+    "ki-lernassistenten",
+    "lernassistenten",
+    "digitalunterricht",
+)
 _TAX_ONLY_MARKERS = ("ki-steuer",)
 
 
@@ -139,6 +161,7 @@ def detect_topic_domain(scenario: str) -> TopicDomain:
     income_hits = sum(1 for c in _INCOME_CUES if _cue_hit(low, c))
     mobility_hits = sum(1 for c in _MOBILITY_CUES if _cue_hit(low, c))
     labor_hits = sum(1 for c in _LABOR_CUES if _cue_hit(low, c))
+    education_hits = sum(1 for c in _EDUCATION_CUES if _cue_hit(low, c))
     # Explicit BGE / income theses win even if «Bürger» / labor roles appear.
     if (
         income_hits >= 1
@@ -147,6 +170,23 @@ def detect_topic_domain(scenario: str) -> TopicDomain:
         return "income"
     if labor_hits >= 1:
         return "labor"
+    # School / KI-Lernassistenten debates (ddfedb31) before generic mobility.
+    if education_hits >= 2 or (
+        education_hits >= 1
+        and any(
+            m in low
+            for m in (
+                "schule",
+                "schulen",
+                "lehrkraft",
+                "lehrkräfte",
+                "lehrkraeften",
+                "bildungsforscher",
+                "lernassistent",
+            )
+        )
+    ):
+        return "education"
     auto_hit = _cue_hit(low, "auto") or _cue_hit(low, "autos")
     if mobility_hits >= 2 or ("verbot" in low and auto_hit):
         return "mobility"
@@ -154,6 +194,8 @@ def detect_topic_domain(scenario: str) -> TopicDomain:
         return "income"
     if mobility_hits > 0:
         return "mobility"
+    if education_hits > 0:
+        return "education"
     return "generic"
 
 
@@ -168,6 +210,9 @@ def _extract_measure_span(scenario: str) -> str | None:
         r"[Mm]ietendeckel(?:\s+für\s+(?:Bestands)?wohnungen)?",
         r"(?:[Ee]inführung\s+einer\s+)?[Kk]I-Steuer(?:\s+auf\s+KI)?",
         r"[Ss]chulreform",
+        r"[Kk]I-Lernassistenten",
+        r"[Ll]ernassistenten",
+        r"[Dd]igitalunterricht",
         r"[Aa]uto-?[Vv]erbot",
     )
     for pat in patterns:
@@ -192,6 +237,14 @@ def measure_label(scenario: str, domain: TopicDomain | None = None) -> str:
         return "bedingungsloses Grundeinkommen"
     if domain == "labor":
         return "Vier-Tage-Woche"
+    if domain == "education":
+        if "lernassistent" in low or "ki-lern" in low:
+            return "KI-Lernassistenten"
+        if "schulreform" in low:
+            return "Schulreform"
+        if "digitalunterricht" in low:
+            return "Digitalunterricht"
+        return "Bildungsmaßnahme"
     if domain == "mobility":
         if "verbot" in low:
             return "Auto-Verbot"
@@ -269,8 +322,9 @@ def foreign_topic_markers_for_scenario(scenario: str) -> tuple[str, ...]:
         _add_if_absent(_LABOR_ONLY_MARKERS)
     if domain != "mobility":
         _add_if_absent(_MOBILITY_ONLY_MARKERS)
+    if domain != "education":
+        _add_if_absent(_EDU_ONLY_MARKERS)
     _add_if_absent(_HOUSING_ONLY_MARKERS)
-    _add_if_absent(_EDU_ONLY_MARKERS)
     _add_if_absent(_TAX_ONLY_MARKERS)
     return tuple(dict.fromkeys(foreign))
 

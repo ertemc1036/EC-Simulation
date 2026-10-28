@@ -53,8 +53,9 @@ def build_society_analytics(
     }
 
     return {
-        "phase": 7,
-        "quality_fix": "7.3.2",
+        "phase": 8,
+        "quality_fix": "8.0",
+        "persona_engine": "v2",
         "backend": "local",
         "execution_kind": execution_kind,
         "content_synthetic": execution_kind in {"manual", "scripted"},
@@ -111,7 +112,9 @@ def build_society_analytics(
         },
         "scheduler": {
             "plans": (scheduler or {}).get("plans", 0),
+            "waves": (scheduler or {}).get("waves", 0),
             "self_as_partner_count": (scheduler or {}).get("self_as_partner_count", 0),
+            "scalable": bool((scheduler or {}).get("scalable", True)),
         },
         "kpis": {
             "memory_coverage": round(lt_agents / max(1, agent_count), 4),
@@ -122,7 +125,7 @@ def build_society_analytics(
             "social_edge_total": sum(int(v or 0) for v in social.values()),
         },
         "note": (
-            "Society Analytics (Phase 7). Offline 10/25/50 × ≤4 Runden. "
+            "Society Analytics (Phase 8.0). Offline 10/25/50 × ≤4 Runden. "
             "Live-Ceilings unverändert; paid_llm_unlocked=false; kein Zep."
         ),
     }

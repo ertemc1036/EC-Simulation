@@ -82,7 +82,7 @@ def test_live_llm_ceilings_unchanged():
     assert cfg.max_cost_usd_per_run == 0.20
     assert cfg.max_parallel_llm_calls == 1
     payload = cfg.status_payload()
-    assert payload["phase"] == "7"
+    assert payload["phase"] in {"7", "8"}
     assert payload["llm_run_requires_approval"] is True
     assert payload["live_test_limits"]["max_agents"] == 5
     assert payload["live_test_limits"]["max_model_calls"] == 10
@@ -236,7 +236,7 @@ def test_scripted_offline_scale_presets(results_dir: Path, n: int):
     result_path = state.get("result_path")
     assert result_path
     data = json.loads(Path(result_path).read_text(encoding="utf-8"))
-    assert data["meta"]["phase"] == 7
+    assert data["meta"]["phase"] in (7, 8)
     assert data["meta"]["agent_count"] == n
     assert data["meta"]["execution_kind"] == "scripted"
     assert data["meta"]["live_llm_limits_unchanged"]["max_agents"] == 5

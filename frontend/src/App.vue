@@ -60,12 +60,14 @@ const llmBanner = computed(() => {
   }
 })
 
-/** Stale Flask on :5001 (pre-Phase-7) misses society intelligence fields. */
+/** Stale Flask on :5001 (pre-Phase-8) misses scalable-foundation fields. */
 const staleBackendBanner = computed(() => {
   const h = health.value
   if (!h) return null
   const phase = String(h.config?.phase ?? h.runtime?.phase ?? '')
   const phaseOk =
+    phase === '8' ||
+    phase.startsWith('8') ||
     phase === '7' ||
     phase.startsWith('7') ||
     phase === '6' ||
@@ -79,6 +81,8 @@ const staleBackendBanner = computed(() => {
   const hasIntel =
     Boolean(h.config?.society_intelligence) ||
     Boolean(h.config?.social_dynamics?.society_analytics) ||
+    Boolean(h.config?.scalable_foundation) ||
+    phase.startsWith('8') ||
     phase.startsWith('7')
   if (
     phaseOk &&
@@ -87,15 +91,15 @@ const staleBackendBanner = computed(() => {
     hasOasisReply &&
     hasSocial &&
     hasOffline &&
-    (phase.startsWith('7') ? hasIntel : true)
+    (phase.startsWith('8') || phase.startsWith('7') ? hasIntel : true)
   ) {
     return null
   }
   return {
     tone: 'warn' as const,
     text:
-      'Backend wirkt veraltet (Phase ≠ 7 oder fehlende Society-Intelligence-Felder). ' +
-      'Flask auf Port 5001 neu starten, sonst fehlen Analytics-/Memory-Ansichten.',
+      'Backend wirkt veraltet (Phase ≠ 8 oder fehlende Scalable-Foundation-Felder). ' +
+      'Flask auf Port 5001 neu starten, sonst fehlen Planner-/Intelligence-Ansichten.',
   }
 })
 
@@ -138,6 +142,10 @@ const societyOverview = computed(() => {
     relationship_bonds: sim.value?.relationships?.bond_count ?? 0,
     opinion_rounds_tracked: sim.value?.opinion_dynamics?.rounds_tracked ?? 0,
     analytics_kpis: sim.value?.society_analytics?.kpis || {},
+    persona_engine: sim.value?.simulation_intelligence?.persona_engine || 'v2',
+    quality_fix: '8.0',
+    planned_cost_usd: sim.value?.cost_plan?.planned_cost_usd ?? 0,
+    intelligence_kpis: sim.value?.simulation_intelligence?.kpis || {},
   }
 })
 
@@ -175,6 +183,10 @@ const progressPct = computed(() => {
 })
 
 const societyAnalytics = computed(() => sim.value?.society_analytics || null)
+
+const simulationIntelligence = computed(() => sim.value?.simulation_intelligence || null)
+
+const costPlan = computed(() => sim.value?.cost_plan || simulationIntelligence.value?.cost_plan || null)
 
 const analyticsKpis = computed(() => {
   const k = societyAnalytics.value?.kpis || societyOverview.value?.analytics_kpis
@@ -446,9 +458,9 @@ onUnmounted(() => {
       <p class="brand">EC-Simulation</p>
       <h1>OASIS Multi-Agent Forum</h1>
       <p class="lede">
-        Phase-7 Society Intelligence — lokales Langzeitgedächtnis, dynamische
-        Beziehungen, Meinungs-Chronologie und Analytics (Offline 10/25/50 × ≤4).
-        Live-LLM bleibt ≤5.
+        Phase-8.0 Scalable Foundation — Persona Engine V2, skalierbarer Scheduler,
+        Cost/Token-Planner und Simulation Intelligence (Offline 10/25/50 × ≤4).
+        Live-LLM bleibt ≤5 · paid_llm_unlocked=false.
       </p>
     </header>
 
@@ -991,10 +1003,11 @@ onUnmounted(() => {
     <section class="analytics" v-if="societyAnalytics || analyticsKpis">
       <h2>Society Analytics</h2>
       <p class="lede-sm">
-        Phase-7 Kennzahlen — Memory, Beziehungen, Meinungsdynamik.
+        Phase-8.0 Kennzahlen — Memory, Beziehungen, Meinungsdynamik, Planner.
         Offline-Scale {{ societyAnalytics?.scale?.agent_count ?? societyOverview?.agent_count ?? '—' }}
         Agenten × ≤{{ societyAnalytics?.scale?.offline_max_rounds ?? 4 }} Runden ·
         paid_llm_unlocked={{ societyAnalytics?.scale?.paid_llm_unlocked === false ? 'false' : '—' }}
+        · Persona {{ sim?.simulation_intelligence?.persona_engine || societyOverview?.persona_engine || 'v2' }}
       </p>
       <div class="society-grid" v-if="analyticsKpis">
         <div>
@@ -1022,6 +1035,35 @@ onUnmounted(() => {
           <span class="v">{{ societyAnalytics?.relationships?.bond_count ?? societyOverview?.relationship_bonds ?? 0 }}</span>
         </div>
       </div>
+
+      <h3>Simulation Intelligence &amp; Cost Plan</h3>
+      <div class="society-grid" v-if="simulationIntelligence || costPlan">
+        <div>
+          <span class="k">Persona Diversity</span>
+          <span class="v mono">{{ simulationIntelligence?.persona?.diversity_score ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Persona Issues</span>
+          <span class="v mono">{{ simulationIntelligence?.persona?.issue_count ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Scheduler Waves</span>
+          <span class="v mono">{{ sim?.scheduler?.waves ?? simulationIntelligence?.scheduler?.waves ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">Planned Calls</span>
+          <span class="v mono">{{ costPlan?.planned_calls ?? '—' }}</span>
+        </div>
+        <div>
+          <span class="k">Planned USD</span>
+          <span class="v mono">${{ costPlan?.planned_cost_usd ?? 0 }}</span>
+        </div>
+        <div>
+          <span class="k">paid_llm_unlocked</span>
+          <span class="v mono">{{ costPlan?.paid_llm_unlocked === false ? 'false' : '—' }}</span>
+        </div>
+      </div>
+      <p v-else class="empty">Intelligence nach Offline-Lauf sichtbar.</p>
 
       <h3>Meinungs-Chronologie</h3>
       <ol class="log" v-if="opinionChronology.length">

@@ -3,6 +3,10 @@
 Phase 3 (MiroFish-ähnlich): generate N unique forum personas bound to the
 scenario text. Offline/deterministic so tests never call a provider.
 
+Phase 8.0 Persona Engine V2: education stakeholders (Lehrkräfte/Eltern/
+Bildungsforscher), topic-noun denylist (Datenschutz≠Stakeholder), German
+individual pools, declined-form canon — fixes live fixture ddfedb31.
+
 Modes:
 - ``fixed_test`` — exactly the Phase-1/2 DEFAULT_AGENTS roster (5), for regression.
 - ``dynamic`` — scenario-derived unique profiles (default for configurable counts).
@@ -357,6 +361,54 @@ _ROLE_PERSONAS_INCOME: dict[str, dict[str, str]] = {
     },
 }
 
+# Education / school AI roles (Phase 8.0 — ddfedb31).
+_ROLE_PERSONAS_EDUCATION: dict[str, dict[str, str]] = {
+    "lehrkraefte": {
+        "name": "Lehrkraft",
+        "slug": "lehrkraefte",
+        "description": "Spricht aus Sicht unterrichtender Lehrkräfte an öffentlichen Schulen.",
+        "goal": "Lernqualität, Arbeitsbelastung und pädagogische Verantwortung absichern.",
+        "conflict": (
+            "Unterstütze «{measure}» nur mit belastbarer Evidenz und Entlastung; "
+            "widersprich Technikversprechen ohne Unterrichtskonzept."
+        ),
+        "style": "pädagogisch, evidenzbezogen, klar",
+    },
+    "eltern": {
+        "name": "Elternstimme",
+        "slug": "eltern",
+        "description": "Vertritt Erziehungsberechtigte zu Chancen, Schutz und Alltag der Kinder.",
+        "goal": "Chancengleichheit und kindgerechten Einsatz der Maßnahme fordern.",
+        "conflict": (
+            "Befürworte «{measure}» bei klaren Qualitäts- und Schutzregeln; "
+            "widersprich ungeprüfter Vollausrollung ohne Elternbeteiligung."
+        ),
+        "style": "fürsorglich, pragmatisch, nachhakend",
+    },
+    "bildungsforscher": {
+        "name": "Bildungsforscher",
+        "slug": "bildungsforscher",
+        "description": "Prüft Lernwirksamkeit, Evaluation und Systemeffekte empirisch.",
+        "goal": "Empirische Risiken und Evaluationsstandards offenlegen.",
+        "conflict": (
+            "Stelle Evidenzlücken von «{measure}» heraus; unterstütze nur "
+            "begleitete Piloten; widersprich anekdotischen Erfolgsversprechen."
+        ),
+        "style": "analytisch, vorsichtig, methodennah",
+    },
+    "schueler": {
+        "name": "Schülerstimme",
+        "slug": "schueler",
+        "description": "Spricht aus Alltagssicht Lernender an Schulen.",
+        "goal": "Lernalltag, Druck und echte Hilfen sichtbar machen.",
+        "conflict": (
+            "Bewerte «{measure}» danach, ob Lernen leichter und fairer wird; "
+            "widersprich Tools, die nur Kontrolle oder Mehrarbeit bringen."
+        ),
+        "style": "direkt, alltagsnah",
+    },
+}
+
 # Labor / working-time roles — no BGE vocabulary (Vier-Tage-Woche etc.).
 _ROLE_PERSONAS_LABOR: dict[str, dict[str, str]] = {
     "arbeitnehmer": {
@@ -477,57 +529,110 @@ _ROLE_PERSONAS: dict[str, dict[str, str]] = {
     "buerger": dict(_ROLE_PERSONAS_MOBILITY["bürger"]),
 }
 
+# Phase 8.0: German given/family names for unknown-role fallbacks (no EN clones).
 _FIRST_NAMES = [
-    "Alex",
-    "Blake",
-    "Casey",
-    "Drew",
-    "Eden",
-    "Finley",
-    "Gray",
-    "Harper",
-    "Indigo",
-    "Jordan",
+    "Lena",
+    "Jonas",
+    "Mara",
+    "Tim",
+    "Ayla",
+    "Samir",
+    "Clara",
+    "Emre",
+    "Nora",
+    "Lars",
+    "Vera",
+    "Holger",
+    "Ines",
+    "Ralf",
+    "Silke",
+    "Gero",
+    "Heike",
+    "Udo",
+    "Maja",
+    "Greta",
+    "Paul",
+    "Sibel",
+    "Uwe",
+    "Miriam",
+    "Dirk",
+    "Beate",
+    "Murat",
+    "Ilona",
+    "Klaus",
+    "Sabine",
+    "Ahmed",
+    "Petra",
+    "Martin",
+    "Judith",
+    "Stefan",
+    "Yasmin",
+    "Bernd",
+    "Hassan",
+    "Monika",
+    "Igor",
     "Kai",
-    "Logan",
-    "Morgan",
-    "Noa",
-    "Oakley",
-    "Parker",
-    "Quinn",
-    "Riley",
-    "Sage",
-    "Taylor",
-    "Uma",
-    "Val",
-    "Wren",
-    "Yael",
-    "Zion",
-    "Ari",
-    "Brook",
-    "Chris",
-    "Dana",
-    "Eli",
-    "Fran",
-    "Gale",
-    "Hyun",
-    "Ira",
-    "Jules",
-    "Kim",
-    "Lee",
-    "Mika",
-    "Nik",
-    "Oli",
-    "Pat",
-    "Remy",
-    "Sam",
-    "Tess",
-    "Uri",
-    "Vic",
-    "Wes",
-    "Xan",
-    "Yuri",
-    "Zoe",
+    "Elena",
+    "Ben",
+    "Anke",
+    "Jan",
+    "Lea",
+    "Omar",
+    "Nina",
+    "Felix",
+    "Tobias",
+]
+_LAST_NAMES = [
+    "Vogt",
+    "Berg",
+    "Demir",
+    "Keller",
+    "Richter",
+    "Hahn",
+    "Kohn",
+    "Neumann",
+    "Otto",
+    "Yilmaz",
+    "Weiss",
+    "Krämer",
+    "Stein",
+    "Brandt",
+    "Fuchs",
+    "Meissner",
+    "Horn",
+    "Lang",
+    "Braun",
+    "Kranz",
+    "Vogel",
+    "Lind",
+    "Mertens",
+    "Acar",
+    "Hartmann",
+    "König",
+    "Sommer",
+    "Celik",
+    "Beyer",
+    "Weber",
+    "Roth",
+    "Farouk",
+    "Lange",
+    "Koch",
+    "Frei",
+    "Wolf",
+    "Said",
+    "Tietz",
+    "Ali",
+    "Schulz",
+    "Petrov",
+    "Nguyen",
+    "Popov",
+    "Adler",
+    "Meier",
+    "Hofmann",
+    "Graf",
+    "Busch",
+    "Engel",
+    "Krug",
 ]
 
 _STOP = frozenset(
@@ -701,7 +806,52 @@ _ROLE_CANON: dict[str, str] = {
     "betriebsrat": "Betriebsrat",
     "betriebsraete": "Betriebsrat",
     "betriebsräte": "Betriebsrat",
+    # Phase 8.0 education stakeholders (ddfedb31).
+    "lehrkraefte": "Lehrkräfte",
+    "lehrkraft": "Lehrkräfte",
+    "lehrkraften": "Lehrkräfte",
+    "lehrkraeften": "Lehrkräfte",
+    "lehrer": "Lehrkräfte",
+    "lehrerinnen": "Lehrkräfte",
+    "eltern": "Eltern",
+    "elternteil": "Eltern",
+    "erziehungsberechtigte": "Eltern",
+    "bildungsforscher": "Bildungsforscher",
+    "bildungsforschern": "Bildungsforscher",
+    "bildungsforscherinnen": "Bildungsforscher",
+    "bildungsexperten": "Bildungsforscher",
+    "schueler": "Schüler",
+    "schüler": "Schüler",
+    "schuelern": "Schüler",
+    "schülern": "Schüler",
 }
+
+# Debate themes / metrics — never agent identities (ddfedb31: Datenschutz…).
+_TOPIC_THEME_DENY = frozenset(
+    {
+        "datenschutz",
+        "chancengleichheit",
+        "lernleistungen",
+        "lernleistung",
+        "privatheit",
+        "privacy",
+        "rolle",
+        "rollen",
+        "qualität",
+        "qualitaet",
+        "evidenz",
+        "potenzial",
+        "risiken",
+        "chancen",
+        "bedingungen",
+        "auswirkungen",
+        "diskussion",
+        "debatte",
+        "thema",
+        "maßnahme",
+        "massnahme",
+    }
+)
 
 # Phase 7.3 — realistic individuals (name/age/occupation) per role; deterministic picks.
 _INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
@@ -816,6 +966,42 @@ _INDIVIDUALS_BY_ROLE: dict[str, list[dict[str, object]]] = {
         {"first": "Elena", "last": "Popov", "age": 30, "occupation": "Lieferdienst-Dispatcherin"},
         {"first": "Ben", "last": "Adler", "age": 23, "occupation": "App-Lieferfahrer"},
     ],
+    # Phase 8.0 education (fixture ddfedb31).
+    "lehrkraefte": [
+        {"first": "Sabine", "last": "Keller", "age": 44, "occupation": "Gymnasiallehrerin"},
+        {"first": "Markus", "last": "Brandt", "age": 51, "occupation": "Realschullehrer"},
+        {"first": "Fatima", "last": "Hassan", "age": 37, "occupation": "Grundschullehrerin"},
+    ],
+    "eltern": [
+        {"first": "Thomas", "last": "Bauer", "age": 41, "occupation": "Elternteil / IT-Projektleiter"},
+        {"first": "Sandra", "last": "Klein", "age": 38, "occupation": "Mutter / Pflegefachkraft"},
+        {"first": "Diego", "last": "Morales", "age": 45, "occupation": "Vater / Handwerksmeister"},
+    ],
+    "bildungsforscher": [
+        {
+            "first": "Prof. Mira",
+            "last": "Hoffmann",
+            "age": 52,
+            "occupation": "Bildungsforscherin",
+        },
+        {
+            "first": "Dr. Lars",
+            "last": "Peters",
+            "age": 47,
+            "occupation": "Schulforscher",
+        },
+        {
+            "first": "Dr. Yasmin",
+            "last": "Kader",
+            "age": 39,
+            "occupation": "Bildungssoziologin",
+        },
+    ],
+    "schueler": [
+        {"first": "Lea", "last": "Sommer", "age": 16, "occupation": "Schülerin Klasse 10"},
+        {"first": "Jonas", "last": "Krüger", "age": 15, "occupation": "Schüler Klasse 9"},
+        {"first": "Amira", "last": "Said", "age": 17, "occupation": "Schülerin Klasse 11"},
+    ],
 }
 
 _DEFAULT_STAKEHOLDERS = ("Bürger", "Unternehmen", "Politik")
@@ -833,6 +1019,11 @@ _DEFAULT_STAKEHOLDERS_LABOR = (
     "Arbeitnehmer",
     "Unternehmer",
     "Ökonomen",
+)
+_DEFAULT_STAKEHOLDERS_EDUCATION = (
+    "Lehrkräfte",
+    "Eltern",
+    "Bildungsforscher",
 )
 
 # Instruction / test-prompt stems that must never become agent names.
@@ -907,15 +1098,23 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
         if len(cleaned) < 3:
             return False
         key = _role_key(cleaned)
+        # Debate themes (Datenschutz, Chancengleichheit, …) are never stakeholders.
+        if key in _TOPIC_THEME_DENY:
+            return False
         # Decline / alias → canonical display name when known.
         if key in _ROLE_CANON:
             cleaned = _ROLE_CANON[key]
             key = _role_key(cleaned)
         elif _is_instruction_fragment(cleaned):
             return False
-        if key in _STOP or key in seen:
+        if key in _STOP or key in _TOPIC_THEME_DENY or key in seen:
             return False
         if key not in _ROLE_CANON and _is_instruction_fragment(cleaned):
+            return False
+        # Unknown free-text fragments that look like topic nouns (no person/group cue).
+        if key not in _ROLE_CANON and key.endswith(
+            ("schutz", "gleichheit", "leistung", "leistungen", "qualität", "qualitaet")
+        ):
             return False
         seen.add(key)
         roles.append(cleaned)
@@ -958,6 +1157,20 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
         "Polizei",
         "Taxi",
         "Lieferdienste",
+        # Phase 8.0 education — longer declined forms first.
+        "Bildungsforscherinnen",
+        "Bildungsforschern",
+        "Bildungsforscher",
+        "Bildungsexperten",
+        "Lehrkräften",
+        "Lehrkräfte",
+        "Lehrkraft",
+        "Lehrerinnen",
+        "Erziehungsberechtigte",
+        "Elternteil",
+        "Eltern",
+        "Schülern",
+        "Schüler",
     ]
     lower = text.lower()
     # Stable appearance order; word-boundary so «Politik» ≠ prefix of «Politiker».
@@ -996,6 +1209,13 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
             maxsplit=1,
             flags=re.IGNORECASE,
         )[0]
+        # «über Lernleistungen, Datenschutz, …» are themes — not stakeholders (8.0).
+        chunk = re.split(
+            r"\b(?:über|ueber|about|regarding|zu\s+den\s+themen)\b",
+            chunk,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
         parts = re.split(r"\s*(?:,|/|;|\bund\b|\boder\b|\band\b|\bor\b)\s*", chunk)
         for part in parts:
             _add(part)
@@ -1025,6 +1245,8 @@ def extract_stakeholder_roles(scenario: str, *, limit: int = 5) -> list[str]:
             fallback = _DEFAULT_STAKEHOLDERS_INCOME
         elif domain == "labor":
             fallback = _DEFAULT_STAKEHOLDERS_LABOR
+        elif domain == "education":
+            fallback = _DEFAULT_STAKEHOLDERS_EDUCATION
         else:
             fallback = _DEFAULT_STAKEHOLDERS
         for role in fallback:
@@ -1067,6 +1289,13 @@ def extract_content_keywords(scenario: str, *, limit: int = 4) -> list[str]:
             "arbeitsmarkt",
             "wirtschaftsexperten",
             "betriebsrat",
+            "lehrkraefte",
+            "eltern",
+            "bildungsforscher",
+            "schueler",
+            "datenschutz",
+            "chancengleichheit",
+            "lernleistungen",
         }
     )
     tokens = re.findall(r"[A-Za-zÄÖÜäöüß0-9-]{3,}", scenario or "")
@@ -1175,6 +1404,19 @@ def _role_family(key: str) -> str:
         return "citizen"
     if k in {"betriebsrat", "betriebsraete", "betriebsräte"}:
         return "works_council"
+    if k in {"lehrkraefte", "lehrkraft", "lehrer", "lehrerinnen"}:
+        return "teachers"
+    if k in {"eltern", "elternteil", "erziehungsberechtigte"}:
+        return "parents"
+    if k in {
+        "bildungsforscher",
+        "bildungsforschern",
+        "bildungsforscherinnen",
+        "bildungsexperten",
+    }:
+        return "edu_research"
+    if k in {"schueler", "schuelern"}:
+        return "students"
     return k
 
 
@@ -1191,6 +1433,8 @@ def _pad_roles_for_domain(
         pad = _DEFAULT_STAKEHOLDERS_INCOME
     elif domain == "labor":
         pad = _DEFAULT_STAKEHOLDERS_LABOR
+    elif domain == "education":
+        pad = _DEFAULT_STAKEHOLDERS_EDUCATION
     else:
         pad = _DEFAULT_STAKEHOLDERS
     out = list(roles)
@@ -1225,6 +1469,19 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
     if domain == "mobility":
         table = dict(_ROLE_PERSONAS_MOBILITY)
         table["buerger"] = dict(table["bürger"])
+        return table
+    if domain == "education":
+        table = dict(_ROLE_PERSONAS_EDUCATION)
+        # Declined / alias keys → same persona.
+        table["lehrkraft"] = dict(table["lehrkraefte"])
+        table["lehrer"] = dict(table["lehrkraefte"])
+        table["lehrerinnen"] = dict(table["lehrkraefte"])
+        table["elternteil"] = dict(table["eltern"])
+        table["erziehungsberechtigte"] = dict(table["eltern"])
+        table["bildungsforschern"] = dict(table["bildungsforscher"])
+        table["bildungsforscherinnen"] = dict(table["bildungsforscher"])
+        table["bildungsexperten"] = dict(table["bildungsforscher"])
+        table["schuelern"] = dict(table["schueler"])
         return table
     # Generic: measure-bound citizen/politics without mobility or BGE leaks.
     table = {
@@ -1311,27 +1568,48 @@ def _persona_table_for_domain(domain: str) -> dict[str, dict[str, str]]:
     return table
 
 
+def _occupation_for_unknown_role(role_key: str, role_label: str) -> str:
+    """Human occupation — never raw ascii keys like ``lehrkraeften``."""
+    label = (role_label or "").strip()
+    if label and label.lower() not in _TOPIC_THEME_DENY:
+        # Singular-ish display for declined plurals.
+        if label.endswith("en") and len(label) > 5:
+            return label[:-1] if not label.endswith("innen") else label
+        return label[:40]
+    key = _role_key(role_key)
+    if key in _ROLE_CANON:
+        return _ROLE_CANON[key]
+    return "Diskussionsteilnehmer/in"
+
+
 def _pick_individual(
     role_key: str,
     *,
     scenario: str,
     agent_id: int,
+    role_label: str = "",
 ) -> dict[str, object]:
     """Deterministic individual (name/age/occupation) for a role key."""
-    pool = _INDIVIDUALS_BY_ROLE.get(role_key) or []
+    # Prefer canonical pool keys (Lehrkräften → lehrkraefte).
+    pool_key = role_key
+    if pool_key not in _INDIVIDUALS_BY_ROLE and pool_key in _ROLE_CANON:
+        pool_key = _role_key(_ROLE_CANON[pool_key])
+    pool = _INDIVIDUALS_BY_ROLE.get(pool_key) or _INDIVIDUALS_BY_ROLE.get(role_key) or []
     if not pool:
-        # Fallback individual from first-name table — never an abstract group label.
+        # Fallback individual from German name tables — never abstract group label.
         first = _FIRST_NAMES[(agent_id + len(role_key)) % len(_FIRST_NAMES)]
-        last = _FIRST_NAMES[(agent_id * 3 + 7) % len(_FIRST_NAMES)]
+        last = _LAST_NAMES[(agent_id * 3 + 7) % len(_LAST_NAMES)]
+        if first.lower() == last.lower():
+            last = _LAST_NAMES[(agent_id * 5 + 11) % len(_LAST_NAMES)]
         age = 24 + ((agent_id * 11 + len(scenario)) % 40)
         return {
             "first": first,
             "last": last,
             "age": age,
-            "occupation": role_key.replace("_", " ")[:28] or "Teilnehmer/in",
+            "occupation": _occupation_for_unknown_role(role_key, role_label),
         }
     digest = hashlib.sha1(
-        f"{scenario}|{agent_id}|{role_key}|indiv".encode("utf-8")
+        f"{scenario}|{agent_id}|{pool_key}|indiv".encode("utf-8")
     ).hexdigest()
     return dict(pool[int(digest[:8], 16) % len(pool)])
 
@@ -1344,13 +1622,18 @@ def _persona_for_role(
     measure: str = "die vorgeschlagene Maßnahme",
 ) -> dict[str, str]:
     key = _role_key(role)
+    if key in _ROLE_CANON:
+        key = _role_key(_ROLE_CANON[key])
     table = _persona_table_for_domain(domain)
     if key in table:
         base = _bind_measure(dict(table[key]), measure)
         base["role_label"] = base.get("name") or role
         return base
-    # Unknown role → keep voice, but never use the raw group noun as display name.
-    label = role[:1].upper() + role[1:]
+    # Unknown role → keep voice, but never use the raw group noun / theme as name.
+    if key in _TOPIC_THEME_DENY:
+        label = arch_fallback.get("name") or "Teilnehmer/in"
+    else:
+        label = role[:1].upper() + role[1:]
     return {
         "name": label,
         "slug": _slugify(role) or arch_fallback["slug"],
@@ -1418,12 +1701,24 @@ def generate_dynamic_agents(
             )
             role_key = _role_key(roles[i])
             # Prefer canonical key used by individual pools.
+            if role_key not in _INDIVIDUALS_BY_ROLE and role_key in _ROLE_CANON:
+                role_key = _role_key(_ROLE_CANON[role_key])
             if role_key not in _INDIVIDUALS_BY_ROLE and persona.get("slug"):
                 role_key = _role_key(str(persona["slug"]))
             # Canon aliases (Arbeitsmarkt→Ökonomen) must hit the economist pool.
             if role_key == "arbeitsmarkt":
                 role_key = "oekonomen"
-            indiv = _pick_individual(role_key, scenario=short, agent_id=i)
+            # Persona display name (Lehrkraft) beats declined raw (Lehrkräften).
+            role_label = str(persona.get("name") or persona.get("role_label") or roles[i])
+            if role_key in _ROLE_CANON:
+                # Keep singular persona titles; canon is for extraction only.
+                pass
+            indiv = _pick_individual(
+                role_key,
+                scenario=short,
+                agent_id=i,
+                role_label=role_label,
+            )
             first = str(indiv["first"])
             last = str(indiv["last"])
             age = int(indiv["age"])  # type: ignore[arg-type]
@@ -1431,7 +1726,6 @@ def generate_dynamic_agents(
             display = f"{first} {last}"
             if display.lower() in used_names:
                 display = f"{first} {last} {voice_id}"
-            role_label = str(persona.get("role_label") or persona.get("name") or roles[i])
             user_name = f"{_slugify(first)}_{_slugify(last)}_{voice_id}"
             description = (
                 f"{age}, {occupation}. {persona['description']} "
@@ -1447,7 +1741,9 @@ def generate_dynamic_agents(
             style = persona["style"]
         else:
             first = _FIRST_NAMES[(i + len(keywords)) % len(_FIRST_NAMES)]
-            last = _FIRST_NAMES[(i * 5 + 11) % len(_FIRST_NAMES)]
+            last = _LAST_NAMES[(i * 5 + 11) % len(_LAST_NAMES)]
+            if first.lower() == last.lower():
+                last = _LAST_NAMES[(i * 7 + 3) % len(_LAST_NAMES)]
             age = 24 + ((i * 13 + len(short)) % 40)
             occupation = arch["name"]
             display = f"{first} {last}"

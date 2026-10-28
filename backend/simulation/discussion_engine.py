@@ -402,7 +402,7 @@ class DiscussionEngine:
         )
         return {
             "backend": "local",
-            "quality_fix": "7.3.2",
+            "quality_fix": "8.0",
             "max_argument_history_per_agent": self.max_history_per_agent,
             "max_global_arguments": self.max_global,
             "argument_count": len(self._global),

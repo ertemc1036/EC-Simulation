@@ -41,6 +41,7 @@ from backend.config import (
 from backend.simulation.agent_generator import generate_agents
 from backend.simulation.agents import DEFAULT_AGENTS, AgentProfile
 from backend.simulation.cost_tracker import CostTracker, LimitExceeded
+from backend.simulation.cost_token_planner import plan_run
 from backend.simulation.discussion_engine import DiscussionEngine
 from backend.simulation.knowledge_graph import LocalKnowledgeGraph
 from backend.simulation.local_memory import LocalAgentMemory
@@ -54,6 +55,7 @@ from backend.simulation.prompt_debug import (
 )
 from backend.simulation.relationship_dynamics import RelationshipDynamics
 from backend.simulation.scripted_model import ScriptedReactiveModel
+from backend.simulation.simulation_intelligence import build_simulation_intelligence
 from backend.simulation.society_analytics import build_society_analytics
 from backend.simulation.social_scheduler import SocialInteractionScheduler
 from backend.simulation.prompts import (
@@ -255,6 +257,8 @@ class SimulationState:
     scheduler: dict[str, Any] = field(default_factory=dict)
     society_overview: dict[str, Any] = field(default_factory=dict)
     discussion: dict[str, Any] = field(default_factory=dict)
+    cost_plan: dict[str, Any] = field(default_factory=dict)
+    simulation_intelligence: dict[str, Any] = field(default_factory=dict)
     execution_kind: str = "manual"  # manual | scripted | live_llm
     error: str | None = None
     result_path: str | None = None
@@ -296,6 +300,8 @@ class SimulationState:
             "scheduler": self.scheduler,
             "society_overview": self.society_overview,
             "discussion": self.discussion,
+            "cost_plan": self.cost_plan,
+            "simulation_intelligence": self.simulation_intelligence,
             "error": self.error,
             "result_path": self.result_path,
             "db_path": self.db_path,
@@ -1576,6 +1582,33 @@ class SimulationEngine:
             interaction_summary=self.state.interaction_summary,
             scheduler=self.state.scheduler,
         )
+        kind = self._execution_kind
+        plan_kind = (
+            "live_llm"
+            if kind == "live_llm"
+            else ("scripted" if kind == "scripted" else "manual")
+        )
+        cost_plan = plan_run(
+            agent_count=len(self._run_agents),
+            rounds=int(self.state.max_steps or 1),
+            execution_kind=plan_kind,  # type: ignore[arg-type]
+            price_input_per_1m=self.cfg.price_input_per_1m,
+            price_output_per_1m=self.cfg.price_output_per_1m,
+            max_tokens_per_call=self.cfg.max_tokens_per_call,
+        )
+        self.state.cost_plan = cost_plan.to_dict()
+        self.state.simulation_intelligence = build_simulation_intelligence(
+            agents=self.state.agents,
+            execution_kind=kind,
+            agent_count=len(self._run_agents),
+            max_steps=self.state.max_steps,
+            step=sync_step,
+            cost_plan=cost_plan,
+            scheduler=self.state.scheduler,
+            society_analytics=self.state.society_analytics,
+            discussion=self.state.discussion,
+            agent_positions=positions_payload,
+        )
         self.state.society_overview = {
             "agent_count": len(self._run_agents),
             "step": sync_step,
@@ -1592,6 +1625,7 @@ class SimulationEngine:
             "offline_max_agents": OFFLINE_MAX_AGENTS,
             "paid_llm_unlocked_for_scale": False,
             "scheduler_plans": (self.state.scheduler or {}).get("plans", 0),
+            "scheduler_waves": (self.state.scheduler or {}).get("waves", 0),
             "self_as_partner_count": (self.state.scheduler or {}).get(
                 "self_as_partner_count", 0
             ),
@@ -1603,6 +1637,11 @@ class SimulationEngine:
                 "rounds_tracked", 0
             ),
             "analytics_kpis": (self.state.society_analytics or {}).get("kpis") or {},
+            "persona_engine": "v2",
+            "quality_fix": "8.0",
+            "planned_cost_usd": cost_plan.planned_cost_usd,
+            "intelligence_kpis": (self.state.simulation_intelligence or {}).get("kpis")
+            or {},
         }
 
     def _persist_results(
@@ -1640,8 +1679,9 @@ class SimulationEngine:
                 "finished_at": _utc_now(),
                 "oasis": "camel-oasis==0.2.5",
                 "mcp_pin": ">=1.3.0,<2",
-                "phase": 7,
-                "quality_fix": "7.3.2",
+                "phase": 8,
+                "quality_fix": "8.0",
+                "persona_engine": "v2",
                 "execution_kind": self._execution_kind,
                 "content_synthetic": self._execution_kind in {"manual", "scripted"},
                 "agent_count": agents_n,
@@ -1685,6 +1725,7 @@ class SimulationEngine:
                     "local_comment_refs": True,
                     "round2_comment_reactions": True,
                     "scheduler": True,
+                    "scalable_scheduler": True,
                     "relations_evidenced_only": [
                         "agrees_with",
                         "disagrees_with",
@@ -1708,7 +1749,8 @@ class SimulationEngine:
                     "scripted_scenarios_max_rounds": OFFLINE_MAX_ROUNDS,
                     "zep_integrated": False,
                     "paid_llm_unlocked": False,
-                    "quality_fix": "7.3.2",
+                    "quality_fix": "8.0",
+                    "persona_engine": "v2",
                     "topic_aware_personas": True,
                     "individual_personas": True,
                     "synthetic_offline_content": True,
@@ -1716,6 +1758,8 @@ class SimulationEngine:
                     "public_seed_no_goal_leak": True,
                     "intelligent_discussion": True,
                     "argument_history_bounded": True,
+                    "cost_token_planner": True,
+                    "simulation_intelligence": True,
                 },
             },
             "agents": self.state.agents,
@@ -1726,11 +1770,13 @@ class SimulationEngine:
             "decision_log": self.state.decision_log,
             "model_calls": self.state.model_calls,
             "cost_summary": self.state.cost_summary,
+            "cost_plan": self.state.cost_plan,
             "agent_memory": self.state.agent_memory,
             "agent_positions": self.state.agent_positions,
             "relationships": self.state.relationships,
             "opinion_dynamics": self.state.opinion_dynamics,
             "society_analytics": self.state.society_analytics,
+            "simulation_intelligence": self.state.simulation_intelligence,
             "knowledge_graph": self.state.knowledge_graph,
             "interaction_summary": self.state.interaction_summary,
             "oasis_reply": self.state.oasis_reply or oasis_reply_status(),
